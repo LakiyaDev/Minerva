@@ -9,7 +9,6 @@ export default function App() {
       <Suspense
         fallback={
           <div className="route-loader">
-            <span>Μ</span>
             <small>opening MINERVA…</small>
           </div>
         }

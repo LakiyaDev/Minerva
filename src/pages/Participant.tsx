@@ -8,13 +8,13 @@ export function Dashboard() {
   const { articles, voted } = useApp();
   const published = articles.filter((a) => a.status === "published");
   const totalVotes = published.reduce((sum, a) => sum + a.votes, 0);
-  const percent = Math.round((voted.length / published.length) * 100);
+  const percent = published.length ? Math.round((voted.length / published.length) * 100) : 0;
   return (
     <div className="dash-page">
       <header className="dash-heading">
         <div>
           <span className="eyebrow">your overview.</span>
-          <h1>Good morning, Anuki.</h1>
+          <h1>Good morning.</h1>
           <p>
             Your ballot is taking shape. There are {published.length - voted.length} articles left
             to consider.
@@ -79,22 +79,7 @@ export function Dashboard() {
           <h2>Your week in MINERVA.</h2>
         </div>
         <div>
-          {[
-            ["Vote recorded", "CRISPR and the Ethics of Germline Editing", "2 days ago"],
-            ["New essay", "Who Does the Model Miss?", "4 days ago"],
-            ["Workshop update", "Scientific writing session resources are available", "6 days ago"],
-          ].map(([kind, title, time]) => (
-            <article key={title}>
-              <span>
-                <Check />
-              </span>
-              <div>
-                <small>{kind}</small>
-                <strong>{title}</strong>
-              </div>
-              <time>{time}</time>
-            </article>
-          ))}
+          <p className="empty-state-copy">No recent activity.</p>
         </div>
       </section>
     </div>
@@ -176,24 +161,7 @@ export function MyVotes() {
 export function Notifications() {
   const { markRead } = useApp();
   const [read, setRead] = useState(false);
-  const notices = [
-    [
-      "New article published",
-      "Who Does the Model Miss? Bias in Diagnostic AI is now ready to read.",
-      "1 hour ago",
-    ],
-    [
-      "Vote recorded",
-      "Your vote for CRISPR and the Ethics of Germline Editing is sealed.",
-      "2 days ago",
-    ],
-    [
-      "Workshop announcement",
-      "Research & Scientific Writing workshop begins Friday at 4:00 PM.",
-      "3 days ago",
-    ],
-    ["Voting closed", "Voting has ended for When Soil Speaks.", "5 days ago"],
-  ];
+  const notices: Array<[string, string, string]> = [];
   return (
     <div className="dash-page">
       <header className="dash-heading">
@@ -212,6 +180,7 @@ export function Notifications() {
         </button>
       </header>
       <div className="notification-list">
+        {notices.length === 0 && <p className="empty-state-copy">No notifications.</p>}
         {notices.map(([title, body, time], i) => (
           <article className={read || i > 1 ? "read" : ""} key={title}>
             <span>
@@ -247,10 +216,10 @@ export function Profile() {
       </header>
       <div className="profile-grid">
         <aside>
-          <div className="large-avatar">AP</div>
-          <h2>Anuki Perera</h2>
-          <p>Faculty of Medical Sciences</p>
-          <span>Participant since August 2025</span>
+          <div className="large-avatar">—</div>
+          <h2>Participant</h2>
+          <p>Account details</p>
+          <span>Member</span>
         </aside>
         <div>
           <form className="profile-form" onSubmit={submit}>
@@ -264,16 +233,17 @@ export function Profile() {
             <div className="two-col">
               <label>
                 Full name
-                <input defaultValue="Anuki Perera" />
+                <input placeholder="Full name" />
               </label>
               <label>
                 Email address
-                <input type="email" defaultValue="anuki@sjp.ac.lk" />
+                <input type="email" placeholder="name@example.com" />
               </label>
             </div>
             <label>
               Faculty
-              <select defaultValue="Faculty of Medical Sciences">
+              <select defaultValue="">
+                <option value="" disabled>Select faculty</option>
                 <option>Faculty of Medical Sciences</option>
                 <option>Faculty of Applied Sciences</option>
                 <option>Faculty of Technology</option>

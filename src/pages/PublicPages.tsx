@@ -317,7 +317,7 @@ export function Leaderboard() {
             <div>
               <h3>{a.title}</h3>
               <small>{a.author}</small>
-              <i style={{ width: `${(a.votes / max) * 100}%` }} />
+              <i style={{ width: `${max ? (a.votes / max) * 100 : 0}%` }} />
             </div>
             <span>{a.category}</span>
             <b>{a.votes}</b>
@@ -346,7 +346,7 @@ export function About() {
         </p>
       </header>
       <section className="manifesto">
-        <span>Μ</span>
+        <span aria-hidden="true">"</span>
         <p>
           We believe scientific literacy grows not from simplifying difficult ideas, but from
           explaining them with care.
@@ -387,15 +387,15 @@ export function About() {
       </section>
       <section className="numbers">
         <div>
-          <strong>150+</strong>
+          <strong>—</strong>
           <span>student participants</span>
         </div>
         <div>
-          <strong>97+</strong>
+          <strong>—</strong>
           <span>countries represented by EMBS</span>
         </div>
         <div>
-          <strong>10K+</strong>
+          <strong>—</strong>
           <span>EMBS members worldwide</span>
         </div>
       </section>

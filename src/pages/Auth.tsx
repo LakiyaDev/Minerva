@@ -10,7 +10,6 @@ function AuthVisual() {
       <Brand light />
       <div className="coin">
         <img className="coin-emblem" src="/minerva-logo.png" alt="" />
-        <span>Μ</span>
       </div>
       <div>
         <span className="eyebrow">a thought from antiquity.</span>
@@ -115,13 +114,13 @@ export function Login() {
               key={signInRole}
               required
               type="email"
-              defaultValue={signInRole === "admin" ? "editor@sjp.ac.lk" : "anuki@sjp.ac.lk"}
+              placeholder="name@example.com"
             />
           </label>
           <label>
             Password
             <div className="password">
-              <input required type={show ? "text" : "password"} defaultValue="minerva2025" />
+              <input required type={show ? "text" : "password"} placeholder="Enter password" />
               <button type="button" onClick={() => setShow(!show)} aria-label="Show password">
                 {show ? <EyeOff /> : <Eye />}
               </button>

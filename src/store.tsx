@@ -24,18 +24,14 @@ const AppContext = createContext<Store | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [role, setRoleState] = useState<Role>(() => {
-    const storedRole = localStorage.getItem("minerva-role");
-    return storedRole === "participant" || storedRole === "admin" ? storedRole : "guest";
+    localStorage.removeItem("minerva-role");
+    return "guest";
   });
   const [articles, setArticles] = useState(initialArticles);
-  const [voted, setVoted] = useState<string[]>([
-    "crispr-ethics",
-    "gentle-sequence",
-    "teaching-wonder",
-  ]);
+  const [voted, setVoted] = useState<string[]>([]);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingVote, setPendingVote] = useState<string | null>(null);
-  const [unread, setUnread] = useState(3);
+  const [unread, setUnread] = useState(0);
 
   const setRole = (next: Role) => {
     setRoleState(next);

@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Brand } from "./Brand";
 import { useApp } from "../store";
 
@@ -21,6 +21,9 @@ export function AppShell({ admin = false }: { admin?: boolean }) {
   const [open, setOpen] = useState(false);
   const { unread, setRole } = useApp();
   const navigate = useNavigate();
+  useEffect(() => {
+    document.body.classList.remove("book-ruins-theme");
+  }, []);
   const links = admin
     ? [
         ["/admin", "Overview", House],
@@ -80,7 +83,7 @@ export function AppShell({ admin = false }: { admin?: boolean }) {
           </button>
           <div>
             <span className="eyebrow">{admin ? "editor workspace" : "monday, 08 december"}</span>
-            <strong>{admin ? "MINERVA administration" : "Welcome back, Anuki"}</strong>
+            <strong>{admin ? "MINERVA administration" : "Welcome back"}</strong>
           </div>
           <div className="profile-chip">
             <button aria-label="Notifications">
@@ -89,8 +92,8 @@ export function AppShell({ admin = false }: { admin?: boolean }) {
             </button>
             <span>AP</span>
             <div>
-              <strong>Anuki Perera</strong>
-              <small>{admin ? "Editor" : "Medical Sciences"}</small>
+              <strong>{admin ? "Editor" : "Participant"}</strong>
+              <small>{admin ? "Administration" : "Account"}</small>
             </div>
           </div>
         </header>

@@ -39,10 +39,10 @@ export function AdminOverview() {
     .slice(0, 6)
     .map((a) => ({ name: a.title.slice(0, 16) + "…", votes: a.votes }));
   const stats: Array<[LucideIcon, string | number, string, string]> = [
-    [UsersRound, 148, "participants", "+12 this month"],
-    [FileText, published.length, "published articles", "2 in draft"],
-    [Vote, votes.toLocaleString(), "total votes", "+18% this week"],
-    [ToggleLeft, published.filter((a) => a.voting === "open").length, "open ballots", "live now"],
+    [UsersRound, 0, "participants", "No data"],
+    [FileText, published.length, "published articles", "No data"],
+    [Vote, votes.toLocaleString(), "total votes", "No data"],
+    [ToggleLeft, published.filter((a) => a.voting === "open").length, "open ballots", "No data"],
   ];
   return (
     <div className="admin-page">
@@ -120,18 +120,7 @@ export function AdminOverview() {
           <span className="eyebrow">recent activity.</span>
           <h2>What changed today</h2>
         </header>
-        {[
-          "New participant registered · Kasuni Rathnayake",
-          "Vote recorded · The Quiet Signal",
-          "Article published · Who Does the Model Miss?",
-          "Voting closed · When Soil Speaks",
-        ].map((item, i) => (
-          <div key={item}>
-            <span>{i < 2 ? "just now" : `${i + 1}h ago`}</span>
-            <p>{item}</p>
-            <i />
-          </div>
-        ))}
+        <p className="empty-state-copy">No recent activity.</p>
       </section>
     </div>
   );
@@ -225,7 +214,7 @@ export function AdminArticles() {
               </button>
               <button
                 aria-label="Delete"
-                onClick={() => confirm("Delete this mock article?") && deleteArticle(a.id)}
+                onClick={() => confirm("Delete this article?") && deleteArticle(a.id)}
               >
                 <Trash2 />
               </button>
@@ -251,12 +240,15 @@ export function CreateArticle() {
       author: String(data.get("author")),
       faculty: "University of Sri Jayewardenepura",
       category: String(data.get("category")),
-      date: "08 Dec 2025",
+      date: new Date().toLocaleDateString("en-US", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      }),
       votes: 0,
       status: String(data.get("action")) === "publish" ? "published" : "draft",
       voting: "closed",
-      image:
-        "https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?auto=format&fit=crop&w=1400&q=85",
+      image: "",
       excerpt: String(data.get("excerpt")),
     };
     addArticle(article);
@@ -397,11 +389,11 @@ export function Results() {
           <span>votes cast</span>
         </div>
         <div>
-          <strong>148</strong>
+          <strong>0</strong>
           <span>participants</span>
         </div>
         <div>
-          <strong>76%</strong>
+          <strong>0%</strong>
           <span>participation</span>
         </div>
       </div>
@@ -465,7 +457,7 @@ export function Results() {
 }
 
 export function Participants() {
-  const [inactive, setInactive] = useState<string[]>(["Kavishka Dissanayake"]);
+  const [inactive, setInactive] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   return (
     <div className="admin-page">
@@ -539,11 +531,11 @@ export function AdminSettings() {
           <h2>Editor profile</h2>
           <label>
             Display name
-            <input defaultValue="MINERVA Editor" />
+            <input placeholder="Editor name" />
           </label>
           <label>
             Contact email
-            <input defaultValue="embs@sjp.ac.lk" />
+            <input placeholder="name@example.com" />
           </label>
           <button className="btn">save profile</button>
         </section>
@@ -563,12 +555,12 @@ export function AdminSettings() {
         </section>
         <section className="platform-info">
           <span>MINERVA</span>
-          <h2>2025 Edition</h2>
+          <h2>Editorial Platform</h2>
           <p>
             IEEE Engineering in Medicine and Biology Society Student Branch Chapter, University of
             Sri Jayewardenepura.
           </p>
-          <small>Frontend demonstration · Mock data</small>
+          <small>Backend integration ready</small>
         </section>
       </div>
     </div>

@@ -22,7 +22,6 @@ export function PublicShell() {
   return (
     <div>
       <header className={`public-nav ${scrolled ? "scrolled" : ""}`}>
-        <Brand />
         <nav className="desktop-nav" aria-label="Main navigation">
           {nav.map(([to, label]) => (
             <NavLink key={to} to={to} end={to === "/"}>
@@ -44,7 +43,6 @@ export function PublicShell() {
           <button aria-label="Close menu" onClick={() => setMenu(false)}>
             <X />
           </button>
-          <Brand />
           {nav.map(([to, label], i) => (
             <Link
               key={to}
