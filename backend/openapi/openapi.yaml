@@ -1,0 +1,994 @@
+openapi: 3.1.0
+info:
+  title: Minerva Digital Platform API — Identity & Access
+  version: 1.0.0
+  description: |
+    Identity & Access Management contract for the Minerva Digital Platform.
+    Readers authenticate with Google OAuth; staff use password + TOTP.
+    Browser clients use the Sanctum session cookie (send credentials).
+  contact:
+    name: Minerva Platform Team
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local
+  - url: https://api.example.com/api/v1
+    description: Production (placeholder)
+tags:
+  - name: Auth
+  - name: Me
+  - name: Admin
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+paths:
+  /auth/google/redirect:
+    get:
+      tags: [Auth]
+      summary: Start reader Google sign-in
+      description: Returns the Google authorization URL and a server-side single-use state value.
+      security: []
+      responses:
+        '200':
+          description: Authorization URL issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [authorization_url, expires_in]
+                    properties:
+                      authorization_url:
+                        type: string
+                        format: uri
+                      expires_in:
+                        type: integer
+                        example: 600
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Google OAuth callback
+      description: |
+        Validates the single-use state, exchanges the authorization code, requires a
+        Google-verified email, provisions or links a participant account and establishes
+        a session. The browser is redirected to the SPA with `auth=success` or
+        `auth=error&reason=<safe_code>`.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+        - name: error
+          in: query
+          schema: { type: string }
+      responses:
+        '302':
+          description: Redirect to the configured SPA callback
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/login:
+    post:
+      tags: [Auth]
+      summary: Staff password login
+      description: |
+        Verifies the password and returns either a 202 MFA challenge/setup token or,
+        if MFA is disabled by policy, an authenticated session.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 12, maxLength: 4096 }
+      responses:
+        '200':
+          description: Authenticated (MFA not required by policy)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [authenticated] }
+                      user: { $ref: '#/components/schemas/Me' }
+        '202':
+          description: MFA verification or enrolment required
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [status, challenge_token, expires_in]
+                    properties:
+                      status:
+                        type: string
+                        enum: [mfa_required, mfa_setup_required]
+                      challenge_token: { type: string }
+                      expires_in: { type: integer, example: 300 }
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '423':
+          description: Account temporarily locked
+          headers:
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Verify TOTP or recovery code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, code]
+              properties:
+                token: { type: string }
+                code: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: Authenticated; session cookie issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [authenticated] }
+                      user: { $ref: '#/components/schemas/Me' }
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '422':
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/mfa/setup:
+    post:
+      tags: [Auth]
+      summary: Begin TOTP enrolment
+      description: Available only with a valid `mfa_setup` challenge token (post-password).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        '200':
+          description: Secret and QR code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [secret, otpauth_url, qr_svg]
+                    properties:
+                      secret: { type: string }
+                      otpauth_url: { type: string }
+                      qr_svg: { type: string, description: "data:image/svg+xml;base64 URI" }
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '409':
+          description: MFA already enabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/mfa/setup/confirm:
+    post:
+      tags: [Auth]
+      summary: Confirm TOTP enrolment and sign in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, code]
+              properties:
+                token: { type: string }
+                code: { type: string }
+      responses:
+        '201':
+          description: MFA enabled; session established; recovery codes returned once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [authenticated] }
+                      recovery_codes:
+                        type: array
+                        items: { type: string }
+                      user: { $ref: '#/components/schemas/Me' }
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/invitations/accept:
+    post:
+      tags: [Auth]
+      summary: Accept a staff invitation
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, name, password, password_confirmation]
+              properties:
+                token: { type: string }
+                name: { type: string, maxLength: 120 }
+                password: { type: string, minLength: 12 }
+                password_confirmation: { type: string }
+      responses:
+        '201':
+          description: Staff account created and signed in (TOTP enrolment required)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/Me' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a staff password reset
+      description: Always returns 202 to prevent account enumeration.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '202':
+          description: Generic acknowledgement
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/staff/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset a staff password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, email, password, password_confirmation]
+              properties:
+                token: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 12 }
+                password_confirmation: { type: string }
+      responses:
+        '200':
+          description: Password reset; all sessions revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '422':
+          description: Invalid/expired token or weak password
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out
+      responses:
+        '200':
+          description: Signed out
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /me:
+    get:
+      tags: [Me]
+      summary: Current identity, roles, permissions and capabilities
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Me' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      tags: [Me]
+      summary: Update display name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Me' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /me/sessions:
+    delete:
+      tags: [Me]
+      summary: Revoke all other sessions and tokens
+      responses:
+        '200':
+          description: Sessions revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      revoked_sessions: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /me/two-factor/setup:
+    post:
+      tags: [Me]
+      summary: Begin TOTP enrolment for the authenticated user
+      responses:
+        '200':
+          description: Secret and QR code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      secret: { type: string }
+                      otpauth_url: { type: string }
+                      qr_svg: { type: string }
+        '409':
+          description: MFA already enabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /me/two-factor/confirm:
+    post:
+      tags: [Me]
+      summary: Confirm TOTP enrolment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200':
+          description: Recovery codes (shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      recovery_codes:
+                        type: array
+                        items: { type: string }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /me/two-factor/disable:
+    post:
+      tags: [Me]
+      summary: Disable TOTP (password + current code required)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, code]
+              properties:
+                password: { type: string }
+                code: { type: string }
+      responses:
+        '200':
+          description: Disabled; all sessions revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List users
+      description: Requires `user.manage` and a confirmed TOTP factor.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: role
+          in: query
+          schema: { type: string, enum: [participant, publisher, administrator] }
+        - name: is_active
+          in: query
+          schema: { type: boolean }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminUser' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/users/{user}:
+    parameters:
+      - $ref: '#/components/parameters/UserUlid'
+    get:
+      tags: [Admin]
+      summary: Get a user
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AdminUser' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Admin]
+      summary: Update a user (name / active state)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                is_active: { type: boolean }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/AdminUser' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Last administrator protection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/users/{user}/roles:
+    parameters:
+      - $ref: '#/components/parameters/UserUlid'
+    post:
+      tags: [Admin]
+      summary: Assign a role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string, enum: [participant, publisher, administrator] }
+      responses:
+        '200':
+          description: Updated roles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RolesResponse' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Last administrator protection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Admin]
+      summary: Revoke a role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string }
+      responses:
+        '200':
+          description: Updated roles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RolesResponse' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Last administrator protection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/users/{user}/permissions:
+    parameters:
+      - $ref: '#/components/parameters/UserUlid'
+    post:
+      tags: [Admin]
+      summary: Grant a direct, optionally expiring permission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permission]
+              properties:
+                permission: { type: string }
+                expires_at: { type: string, format: date-time, nullable: true }
+      responses:
+        '201':
+          description: Grant created/updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user_id: { type: string }
+                      permission: { type: string }
+                      expires_at: { type: string, format: date-time, nullable: true }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Permission requires a role
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Admin]
+      summary: Revoke a direct permission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permission]
+              properties:
+                permission: { type: string }
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/users/{user}/publisher-permission:
+    parameters:
+      - $ref: '#/components/parameters/UserUlid'
+    post:
+      tags: [Admin]
+      summary: Grant publisher capability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                can_publish_directly: { type: boolean, default: false }
+      responses:
+        '201':
+          description: Grant created; publisher role attached
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublisherPermission' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      tags: [Admin]
+      summary: Change direct-publish eligibility
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [can_publish_directly]
+              properties:
+                can_publish_directly: { type: boolean }
+      responses:
+        '200':
+          description: Grant updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublisherPermission' }
+        '409':
+          description: No active grant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Admin]
+      summary: Revoke publisher capability (removes publisher role)
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/staff-invitations:
+    get:
+      tags: [Admin]
+      summary: List staff invitations
+      responses:
+        '200':
+          description: Paginated invitations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/StaffInvitation' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Admin]
+      summary: Invite a staff member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [publisher, administrator] }
+      responses:
+        '201':
+          description: Invitation created and emailed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/StaffInvitation' }
+        '409':
+          description: Account already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/roles:
+    get:
+      tags: [Admin]
+      summary: List roles and their permissions
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Role' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: minerva-api_session
+      description: Sanctum first-party session cookie (HttpOnly).
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Optional Sanctum personal access token for trusted non-browser clients.
+
+  parameters:
+    UserUlid:
+      name: user
+      in: path
+      required: true
+      schema: { type: string, example: 01J8Z0000000000000000000AA }
+
+  schemas:
+    Error:
+      type: object
+      required: [message, code, request_id]
+      properties:
+        message: { type: string }
+        code: { type: string, example: validation_failed }
+        request_id: { type: string, example: 01J8Z0000000000000000000BB }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+    Message:
+      type: object
+      properties:
+        message: { type: string }
+    Me:
+      type: object
+      required: [id, name, email, roles, permissions, capabilities]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        email_verified: { type: boolean }
+        is_active: { type: boolean }
+        roles:
+          type: array
+          items: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+        capabilities:
+          type: object
+          properties:
+            is_participant: { type: boolean }
+            is_publisher: { type: boolean }
+            can_publish_directly: { type: boolean }
+        two_factor_enabled: { type: boolean }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    AdminUser:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        is_active: { type: boolean }
+        email_verified: { type: boolean }
+        roles:
+          type: array
+          items: { type: string }
+        direct_permissions:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              expires_at: { type: string, format: date-time, nullable: true }
+        publisher_permission:
+          type: object
+          nullable: true
+          properties:
+            can_publish_directly: { type: boolean }
+            granted_at: { type: string, format: date-time, nullable: true }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    StaffInvitation:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        role: { type: string }
+        expires_at: { type: string, format: date-time }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        invited_by: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+    Role:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        permissions:
+          type: array
+          items: { type: string }
+    RolesResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user_id: { type: string }
+            roles:
+              type: array
+              items: { type: string }
+    PublisherPermission:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user_id: { type: string }
+            can_publish_directly: { type: boolean }
+    PaginationMeta:
+      type: object
+      properties:
+        current_page: { type: integer }
+        per_page: { type: integer }
+        total: { type: integer }
+        last_page: { type: integer }
+
+  responses:
+    Unauthenticated:
+      description: Missing or invalid session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidCredentials:
+      description: Invalid credentials or challenge
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not authorized (or MFA enrolment required)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
