@@ -45,7 +45,7 @@ final class PermissionResolver
 
                 $permissions = array_values(array_unique([...$rolePermissions, ...$directPermissions]));
 
-                if ($this->canPublishDirectly($user)) {
+                if ($user->hasRole('publisher') && $this->canPublishDirectly($user)) {
                     $permissions[] = (string) config('identity.publisher.direct_publish_permission');
                 }
 
