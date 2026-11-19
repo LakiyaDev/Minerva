@@ -1,0 +1,10 @@
+{
+  "description": "Explore student science articles, track public rankings, and cast one vote per article through Minerva’s editorial platform for readers, participants, and editors.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
