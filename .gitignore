@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+
+# Local tooling and caches
+.cache/
+*.tsbuildinfo
+vite.config.*.timestamp-*
+.tmp-*
+
+# Environment and logs
+.env*
+*.log
+*-debug.log*
+logs/
+
+# Local agent state
+.claude-replay.*
+**/.figma/design-context/
+**/.plugins/
+**/.opencode-skills/
