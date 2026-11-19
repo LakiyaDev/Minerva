@@ -27,6 +27,7 @@ final class PermissionGrantService
         'publisher.manage',
         'settings.manage',
         'audit.view',
+        'article.publish_own',
         'article.publish_any',
     ];
 
