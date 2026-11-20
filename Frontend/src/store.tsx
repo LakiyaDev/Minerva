@@ -37,6 +37,7 @@ import {
 } from "./services/votingService";
 import { getMe, logoutSession, updateProfileName, type MeDto } from "./services/authService";
 import { getMyComments, type CommentDto } from "./services/commentService";
+import { subscribeVotingResults, disconnectEcho } from "./services/echoService";
 import { ApiError, ApiUnavailableError } from "./services/apiClient";
 
 export type Role = "guest" | "participant" | "publisher" | "admin";
@@ -260,6 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setVoted([]);
     setVoteRecords([]);
     setMyComments([]);
+    disconnectEcho();
     localStorage.removeItem("minerva-role");
   }, []);
 
@@ -447,6 +449,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void refreshMyVotes();
     void refreshMyComments();
   }, [role, refreshMyVotes, refreshMyComments]);
+
+  // Real-time WebSocket listener via Laravel Reverb: update article vote tallies immediately.
+  useEffect(() => {
+    if (role === "guest" || !votingStatus?.period?.id) {
+      return;
+    }
+
+    const unsubscribe = subscribeVotingResults(votingStatus.period.id, (payload) => {
+      setArticles((current) =>
+        current.map((item) =>
+          item.id === payload.article_id ? { ...item, votes: payload.vote_count } : item,
+        ),
+      );
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [role, votingStatus?.period?.id]);
 
   /** Applies a workflow response to the locally cached list. */
   const applyArticle = useCallback((dto: ArticleDetailDto) => {

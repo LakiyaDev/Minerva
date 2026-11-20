@@ -10,8 +10,10 @@
     "format": "oxfmt"
   },
   "dependencies": {
+    "laravel-echo": "^2.6.3",
     "lucide-react": "^1.70.0",
     "motion": "^14.10.1",
+    "pusher-js": "^8.6.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^8.5.1",

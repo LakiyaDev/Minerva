@@ -59,6 +59,7 @@ import {
   type AuditLogDto,
   type PaginatedAuditLogs,
 } from "../services/auditService";
+import { subscribeVotingResults } from "../services/echoService";
 
 function toDateTimeLocal(iso?: string): string {
   if (!iso) return "";
@@ -1156,6 +1157,53 @@ export function Results() {
       window.clearInterval(interval);
     };
   }, []);
+
+  // Real-time WebSocket updates via Laravel Reverb: instant tally updates
+  useEffect(() => {
+    const periodId = statistics?.active_period?.id || analytics?.voting.active_period?.id;
+    if (!periodId) return;
+
+    const unsubscribe = subscribeVotingResults(periodId, (payload) => {
+      setStatistics((prev) => {
+        if (!prev) return prev;
+        const updatedArticles = prev.top_articles
+          .map((item) =>
+            item.article_id === payload.article_id
+              ? { ...item, vote_count: payload.vote_count }
+              : item,
+          )
+          .sort((a, b) => b.vote_count - a.vote_count);
+        return {
+          ...prev,
+          total_votes: prev.total_votes + 1,
+          top_articles: updatedArticles,
+        };
+      });
+
+      setAnalytics((prev) => {
+        if (!prev) return prev;
+        const updatedArticles = prev.top_performing_articles
+          .map((item) =>
+            item.id === payload.article_id
+              ? { ...item, votes_count: payload.vote_count }
+              : item,
+          )
+          .sort((a, b) => b.votes_count - a.votes_count);
+        return {
+          ...prev,
+          voting: {
+            ...prev.voting,
+            total_votes: prev.voting.total_votes + 1,
+          },
+          top_performing_articles: updatedArticles,
+        };
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [statistics?.active_period?.id, analytics?.voting.active_period?.id]);
 
   const fallbackSorted = [...articles]
     .filter((a) => a.status === "published")
