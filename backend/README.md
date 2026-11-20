@@ -3,14 +3,18 @@
 Laravel modular-monolith API for the Minerva Digital Platform (IEEE EMBS Student
 Branch Chapter, University of Sri Jayawardenepura).
 
-This repository currently implements the **Identity & Access Management (IAM)**
-module: reader Google sign-in, staff password + TOTP authentication, RBAC,
-publisher grants, invitations, session control and audit logging. Later modules
-(Content, Articles, Voting, Comments, Analytics, Integrations, Media) plug into
-the same module structure.
+This repository currently implements the **Identity & Access Management (IAM)**,
+**Articles & Editorial**, and **Voting** modules: reader Google sign-in, staff
+password + TOTP authentication, RBAC, publisher grants, invitations, session
+control and audit logging; the public article catalogue, publisher workspace,
+and editorial review queue; and transaction-safe voting with configurable
+windows, live participant results, and Reverb broadcasting. Later modules (`Comments`, `Analytics`, `Integrations`, `Audit`) plug into the
+same module structure. Static informational website content (workshops,
+timeline, sponsors, committee, and magazine pages) is maintained directly in
+the frontend with no backend CMS module required.
 
 - API base path: `/api/v1`
-- Architecture: `docs/identity-and-access.md`
+- Architecture: `docs/identity-and-access.md`, `docs/articles-and-editorial.md`, `docs/voting.md`
 - API contract: `openapi/openapi.yaml`
 - Requirements source: `Docs/` on the `main` branch (SRS v1.1, backend guide)
 
@@ -26,7 +30,7 @@ the same module structure.
 | Auth (staff) | Password + TOTP (Google2FA) + recovery codes |
 | Authorization | Roles + permissions + policies + middleware |
 | Audit | Append-only `audit_logs` (Audit module) |
-| Realtime / files | Reverb, S3 (wired in later modules) |
+| Realtime / files | Reverb broadcast events + private channels wired for Voting; S3/local storage wired in Articles & Editorial |
 
 ## Quick start
 
@@ -97,6 +101,8 @@ MFA. See `docs/identity-and-access.md` for the full flows.
 app/
   Modules/
     Identity/   users, OAuth, staff auth, MFA, RBAC, publisher grants, sessions
+    Articles/   catalogue, categories, publisher workspace, editorial workflow
+    Voting/     voting periods, irrevocable votes, summaries, standings, Reverb events
     Audit/      append-only audit trail + AuditLogger implementation
   Shared/       response envelope, error renderer, middleware, small primitives
 routes/
@@ -119,6 +125,11 @@ reading Identity tables.
 - [x] Admin user/role/permission/publisher/invitation endpoints
 - [x] Audit logging for security-relevant actions
 - [x] Feature tests for IAM
+- [x] Articles & Editorial module: six-state workflow, append-only status history, audit trail, domain events
+- [x] Public catalogue / article detail / category endpoints, publisher workspace, admin review queue
+- [x] OpenAPI 3.1 contract for the article endpoints
+- [x] Voting module: configurable voting periods, InnoDB unique vote constraint (`409` duplicate protection), summaries, leaderboard, `/me/votes`, admin statistics, and `VotingResultsUpdated` Reverb broadcasts
+- [x] OpenAPI 3.1 contract and feature tests for all voting endpoints and window boundaries
 - [ ] Email delivery provider (SMTP/SES) for invitations and resets
 - [ ] Redis-backed cache/rate limiting for multi-node production
 - [ ] OpenAPI contract tests and CI pipeline

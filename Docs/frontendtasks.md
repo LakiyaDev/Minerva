@@ -52,16 +52,18 @@ Recommended feature modules: `auth`, `public-content`, `articles`, `voting`, `co
 
 ## 5. Public Website Tasks
 
+> **Architecture Decision — Static Informational Content:** `FE-10`–`FE-17` (initiative overview, workshops, competition rules, timeline, sponsors, organizing committee, and magazine/E-Magazine content) are hardcoded/statically maintained in frontend data modules and components with **no backend CMS API required**. `FE-18` and `FE-19` (published articles & categories) are backend API-driven.
+
 | ID | Task | Key requirements | SRS reference |
 |---|---|---|---|
-| FE-10 | Homepage | Hero, initiative introduction, featured workshops/events/articles, sponsor preview, calls to register and browse articles | FR-01 |
-| FE-11 | Initiative page | Present objectives, activities, initiative structure, competition summary, and related links | FR-02, FR-04 |
-| FE-12 | Workshops pages | Workshop list and detail views with title, description, date, speakers, and supplied resources | FR-03 |
-| FE-13 | Competition information page | Rules, eligibility, important dates, article browsing entry point, sign-in prompt for voting | FR-04 |
-| FE-14 | Timeline page | Chronological, responsive event timeline; clear event dates and statuses | FR-05 |
-| FE-15 | Sponsors page | Sponsor names, logos, optional links, and accessible logo alt text | FR-06 |
-| FE-16 | Organizing committee page | Committee members, teams/positions, and supplied profile information | FR-07 |
-| FE-17 | Magazine pages | Magazine overview, E-Magazine metadata, and accessible link/download/open action when published | FR-08, FR-09 |
+| FE-10 | Homepage | Hero, initiative introduction, featured articles/static highlights, calls to register and browse articles | FR-01 |
+| FE-11 | Initiative page | Present objectives, activities, initiative structure, competition summary, and related links (frontend static) | FR-02, FR-04 |
+| FE-12 | Workshops pages | Workshop list and detail views with title, description, date, speakers, and supplied resources (frontend static) | FR-03 |
+| FE-13 | Competition information page | Rules, eligibility, important dates, article browsing entry point, sign-in prompt for voting (frontend static) | FR-04 |
+| FE-14 | Timeline page | Chronological, responsive event timeline; clear event dates and statuses (frontend static) | FR-05 |
+| FE-15 | Sponsors page | Sponsor names, logos, optional links, and accessible logo alt text (frontend static) | FR-06 |
+| FE-16 | Organizing committee page | Committee members, teams/positions, and supplied profile information (frontend static) | FR-07 |
+| FE-17 | Magazine pages | Magazine overview, E-Magazine metadata, and accessible link/download/open action (frontend static) | FR-08, FR-09 |
 | FE-18 | Public article catalogue | Paginated/searchable/filterable published article list, categories, featured state, and article cards | FR-25, FR-26 |
 | FE-19 | Public article detail | Article content, author, date, category, permitted attachments, comments section, and contextual sign-in prompts | FR-25, FR-26, FR-42 |
 
@@ -125,10 +127,10 @@ Recommended feature modules: `auth`, `public-content`, `articles`, `voting`, `co
 
 | ID | Task | Key requirements | SRS reference |
 |---|---|---|---|
-| FE-50 | Administrator dashboard | Overview cards and navigation for users, content, articles, voting, comments, analytics, and audit activity | FR-57 |
+| FE-50 | Administrator dashboard | Overview cards and navigation for users, articles, voting, comments, analytics, and audit activity | FR-57 |
 | FE-51 | User management | Search/list users, inspect roles, grant/revoke publisher permission, configure direct-publish setting, confirm high-impact changes | FR-18–FR-19 |
 | FE-52 | Article review queue | Filterable pending list; article preview; approve/reject; optional feedback; publish/unpublish/feature controls | FR-23–FR-24 |
-| FE-53 | Content management screens | CRUD interfaces for workshops, resources, timeline, sponsors, committee, magazine, and E-Magazine content | FR-10, FR-03, FR-05–FR-09 |
+| FE-53 | Content management screens *(Not needed)* | **Out of Scope / Frontend Static:** workshops, timeline, sponsors, committee, and magazine content are hardcoded in the frontend; no admin CMS screens or backend API needed | FR-10 (updated) |
 | FE-54 | Voting management | Configure and display voting start/end times; show current open/closed status; use explicit confirmation for changes | FR-39–FR-41 |
 | FE-55 | Comment moderation queue | Filter comments; view author/article/timestamp; remove inappropriate comments with mandatory confirmation and reason where API supports it | FR-45–FR-47 |
 | FE-56 | Platform analytics | Platform-wide article, vote, and engagement views with useful filters and export action only if provided by API | FR-39, FR-53 |

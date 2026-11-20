@@ -109,5 +109,11 @@ final class GoogleAuthenticationService
         }
 
         $user->roles()->syncWithoutDetaching([$role->getKey()]);
+
+        // The relation may already be loaded (isStaff() reads it), so drop the
+        // stale copy and reload the freshly assigned roles.
+        $user->unsetRelation('roles');
+        $user->load('roles');
+        $user->flushPermissionCache();
     }
 }

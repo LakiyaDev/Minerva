@@ -24,7 +24,8 @@ const chapters = ["prologue", "featured", "library", "the ballot", "our story"];
 type TurnState = { to: number; direction: 1 | -1; mode: "auto" | "drag" };
 
 export function Home() {
-  const { articles } = useApp();
+  const { articles, role } = useApp();
+  const showVotes = role !== "guest";
   const published = articles.filter((article) => article.status === "published");
   const leaders = useMemo(
     () => [...published].sort((a, b) => b.votes - a.votes).slice(0, 5),
@@ -94,9 +95,9 @@ export function Home() {
 
   const spreads = [
     <OpeningSpread key="opening" />,
-    <FeaturedSpread key="featured" articles={published.slice(0, 3)} />,
+    <FeaturedSpread key="featured" articles={published.slice(0, 3)} showVotes={showVotes} />,
     <LibrarySpread key="library" articles={published.slice(3, 7)} />,
-    <BallotSpread key="ballot" leaders={leaders} />,
+    <BallotSpread key="ballot" leaders={leaders} showVotes={showVotes} />,
     <StorySpread key="story" />,
   ];
 
@@ -397,7 +398,13 @@ function OpeningSpread() {
   );
 }
 
-function FeaturedSpread({ articles }: { articles: Article[] }) {
+function FeaturedSpread({
+  articles,
+  showVotes,
+}: {
+  articles: Article[];
+  showVotes: boolean;
+}) {
   return (
     <>
       <Page side="left" number="03" className="chapter-opener">
@@ -415,7 +422,12 @@ function FeaturedSpread({ articles }: { articles: Article[] }) {
       </Page>
       <Page side="right" number="04" className="feature-page">
         {articles.map((article, index) => (
-          <BookArticle key={article.id} article={article} index={index + 1} />
+          <BookArticle
+            key={article.id}
+            article={article}
+            index={index + 1}
+            showVotes={showVotes}
+          />
         ))}
         <Link className="book-inline-link" to="/articles">
           see the complete collection <ArrowRight />
@@ -440,7 +452,7 @@ function LibrarySpread({ articles }: { articles: Article[] }) {
         <h2>Many ways of seeing.</h2>
         <div className="book-index">
           {articles.map((article, index) => (
-            <Link to={`/articles/${article.id}`} key={article.id}>
+            <Link to={`/articles/${article.slug || article.id}`} key={article.id}>
               <span>{String(index + 4).padStart(2, "0")}</span>
               <div>
                 <h3>{article.title}</h3>
@@ -460,7 +472,7 @@ function LibrarySpread({ articles }: { articles: Article[] }) {
   );
 }
 
-function BallotSpread({ leaders }: { leaders: Article[] }) {
+function BallotSpread({ leaders, showVotes }: { leaders: Article[]; showVotes: boolean }) {
   const steps = [
     [BookOpen, "Read", "Every essay is freely available."],
     [UserRound, "Sign in", "Identity protects the public count."],
@@ -493,19 +505,25 @@ function BallotSpread({ leaders }: { leaders: Article[] }) {
             <span className="eyebrow">live standing.</span>
             <h2>The voices rising.</h2>
           </div>
-          <span>votes</span>
+          <span>{showVotes ? "votes" : "ballot"}</span>
         </div>
         <div className="book-ranking">
           {leaders.map((article, index) => (
-            <Link to={`/articles/${article.id}`} key={article.id}>
+            <Link to={`/articles/${article.slug || article.id}`} key={article.id}>
               <strong>{String(index + 1).padStart(2, "0")}</strong>
               <div>
                 <h3>{article.title}</h3>
                 <small>{article.author}</small>
               </div>
               <span>
-                {index === 0 && <Check />}
-                {article.votes}
+                {showVotes ? (
+                  <>
+                    {index === 0 && <Check />}
+                    {article.votes}
+                  </>
+                ) : (
+                  "Sign in"
+                )}
               </span>
             </Link>
           ))}
@@ -582,9 +600,17 @@ function Page({
   );
 }
 
-function BookArticle({ article, index }: { article: Article; index: number }) {
+function BookArticle({
+  article,
+  index,
+  showVotes,
+}: {
+  article: Article;
+  index: number;
+  showVotes: boolean;
+}) {
   return (
-    <Link className="book-article" to={`/articles/${article.id}`}>
+    <Link className="book-article" to={`/articles/${article.slug || article.id}`}>
       <img src={article.image} alt="" />
       <div>
         <span>
@@ -592,7 +618,7 @@ function BookArticle({ article, index }: { article: Article; index: number }) {
         </span>
         <h3>{article.title}</h3>
         <small>
-          {article.author} · {article.votes} votes
+          {article.author} · {showVotes ? `${article.votes} votes` : "Members ballot"}
         </small>
       </div>
       <ArrowRight />

@@ -5,6 +5,7 @@ import { Brand } from "./Brand";
 import { useApp } from "../store";
 
 export function PublicShell() {
+  const { role } = useApp();
   const [scrolled, setScrolled] = useState(false);
   const [menu, setMenu] = useState(false);
   useEffect(() => {
@@ -19,6 +20,11 @@ export function PublicShell() {
     ["/about", "about."],
     ["/leaderboard", "leaderboard."],
   ];
+  const deskTarget =
+    role === "admin" ? "/admin" : role === "publisher" ? "/publisher" : "/dashboard";
+  const deskLabel =
+    role === "admin" ? "admin desk" : role === "publisher" ? "publisher desk" : "dashboard";
+
   return (
     <div>
       <header className={`public-nav ${scrolled ? "scrolled" : ""}`}>
@@ -30,9 +36,15 @@ export function PublicShell() {
           ))}
         </nav>
         <div className="nav-actions">
-          <Link className="btn btn-small" to="/login">
-            sign in
-          </Link>
+          {role === "guest" ? (
+            <Link className="btn btn-small" to="/login">
+              sign in
+            </Link>
+          ) : (
+            <Link className="btn btn-small" to={deskTarget}>
+              {deskLabel}
+            </Link>
+          )}
           <button className="menu-button" aria-label="Open menu" onClick={() => setMenu(true)}>
             <Menu />
           </button>
@@ -53,9 +65,15 @@ export function PublicShell() {
               {label}
             </Link>
           ))}
-          <Link className="mobile-signin" to="/login" onClick={() => setMenu(false)}>
-            Sign in
-          </Link>
+          {role === "guest" ? (
+            <Link className="mobile-signin" to="/login" onClick={() => setMenu(false)}>
+              Sign in
+            </Link>
+          ) : (
+            <Link className="mobile-signin" to={deskTarget} onClick={() => setMenu(false)}>
+              {deskLabel}
+            </Link>
+          )}
         </div>
       )}
       <main>
@@ -116,7 +134,10 @@ function AuthGate() {
           <br />
           <em>identity.</em>
         </h2>
-        <p>Sign in to cast your vote. Reading, rankings and every article remain open to all.</p>
+        <p>
+          Sign in to cast your vote and view live standings. Reading every published article
+          remains open to all.
+        </p>
         <div className="gate-actions">
           <Link className="btn light" to="/login" onClick={() => setAuthOpen(false)}>
             sign in to vote

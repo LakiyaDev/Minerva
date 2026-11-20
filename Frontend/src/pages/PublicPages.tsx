@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,37 +14,102 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router";
 import { ArticleCard } from "../components/ArticleCard";
-import { useApp } from "../store";
+import { CommentSection } from "../components/CommentSection";
+import { mapArticle, useApp } from "../store";
+import {
+  getArticle,
+  getArticles,
+  getAttachmentDownloadUrl,
+  formatAttachmentSize,
+  type ArticleDetailDto,
+  type ArticleSummaryDto,
+} from "../services/articleService";
+import {
+  getArticleVoteResults,
+  getLeaderboard,
+  type ArticleVoteResultDto,
+  type LeaderboardEntryDto,
+} from "../services/votingService";
+import { ApiError, ApiUnavailableError } from "../services/apiClient";
+
+const PAGE_SIZE = 12;
 
 export function Articles() {
-  const { articles } = useApp();
+  const { categories } = useApp();
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("All");
-  const [sort, setSort] = useState("newest");
-  const [visible, setVisible] = useState(6);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [sort, setSort] = useState<"newest" | "popular">("newest");
   const [list, setList] = useState(false);
-  const categories = [
-    "All",
-    ...new Set(articles.filter((a) => a.status === "published").map((a) => a.category)),
-  ];
-  const filtered = useMemo(
-    () =>
-      articles
-        .filter(
-          (a) =>
-            a.status === "published" &&
-            (category === "All" || a.category === category) &&
-            `${a.title} ${a.author}`.toLowerCase().includes(search.toLowerCase()),
-        )
-        .sort((a, b) => (sort === "votes" ? b.votes - a.votes : b.date.localeCompare(a.date))),
-    [articles, search, category, sort],
-  );
+  const [items, setItems] = useState<ArticleSummaryDto[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  // Guards against a slow earlier response overwriting a newer one.
+  const requestSeq = useRef(0);
+
+  // Debounce the search term so typing does not hammer the API.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Any filter change restarts pagination from the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, category, sort]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const seq = ++requestSeq.current;
+    const firstPage = page === 1;
+
+    if (firstPage) setLoading(true);
+    setError(null);
+
+    getArticles(
+      {
+        search: debouncedSearch || undefined,
+        category: category || undefined,
+        sort,
+        page,
+        per_page: PAGE_SIZE,
+      },
+      controller.signal,
+    )
+      .then((response) => {
+        if (seq !== requestSeq.current) return;
+        setItems((current) => (firstPage ? response.data : [...current, ...response.data]));
+        setTotal(response.meta?.total ?? response.data.length);
+      })
+      .catch((requestError) => {
+        if (seq !== requestSeq.current || controller.signal.aborted) return;
+        setError(
+          requestError instanceof ApiUnavailableError
+            ? "The MINERVA API is unreachable. Start the backend to browse the live library."
+            : requestError instanceof ApiError
+              ? requestError.message
+              : "Unable to load articles right now.",
+        );
+      })
+      .finally(() => {
+        if (seq !== requestSeq.current) return;
+        setLoading(false);
+        setLoadingMore(false);
+      });
+
+    return () => controller.abort();
+  }, [debouncedSearch, category, sort, page, reloadToken]);
+
+  const hasMore = items.length < total;
+
   return (
     <div className="page">
       <header className="editorial-header">
-        <span className="eyebrow">
-          the collected work · {articles.filter((a) => a.status === "published").length} essays
-        </span>
+        <span className="eyebrow">the collected work · {total} essays</span>
         <h1>the library.</h1>
         <p>
           Original student perspectives on medicine, technology, living systems and the
@@ -57,24 +122,31 @@ export function Articles() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search title or author"
+            placeholder="Search title or abstract"
             aria-label="Search articles"
           />
         </label>
         <div className="chips">
+          <button className={category === "" ? "active" : ""} onClick={() => setCategory("")}>
+            All
+          </button>
           {categories.map((item) => (
             <button
-              key={item}
-              className={category === item ? "active" : ""}
-              onClick={() => setCategory(item)}
+              key={item.id}
+              className={category === item.slug ? "active" : ""}
+              onClick={() => setCategory(item.slug)}
             >
-              {item}
+              {item.name}
             </button>
           ))}
         </div>
-        <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort articles">
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value as "newest" | "popular")}
+          aria-label="Sort articles"
+        >
           <option value="newest">Newest</option>
-          <option value="votes">Most voted</option>
+          <option value="popular">Featured first</option>
         </select>
         <div className="view-toggle">
           <button
@@ -93,16 +165,41 @@ export function Articles() {
           </button>
         </div>
       </div>
-      {filtered.length ? (
+      {loading ? (
+        <div className="empty-state">
+          <span>◉</span>
+          <h2>gathering the collection.</h2>
+          <p>Loading published articles from the editorial desk.</p>
+        </div>
+      ) : error ? (
+        <div className="empty-state">
+          <span>◉</span>
+          <h2>the library is unavailable.</h2>
+          <p>{error}</p>
+          <button onClick={() => setReloadToken((current) => current + 1)}>retry</button>
+        </div>
+      ) : items.length ? (
         <>
           <div className={`article-grid ${list ? "list" : ""}`}>
-            {filtered.slice(0, visible).map((a, i) => (
-              <ArticleCard article={a} index={i + 1} key={a.id} compact={list} />
+            {items.map((a, i) => (
+              <ArticleCard
+                article={mapArticle(a)}
+                index={i + 1}
+                key={a.id}
+                compact={list}
+              />
             ))}
           </div>
-          {visible < filtered.length && (
-            <button className="load-more" onClick={() => setVisible((n) => n + 3)}>
-              load more articles <ArrowRight size={16} />
+          {hasMore && (
+            <button
+              className="load-more"
+              disabled={loadingMore}
+              onClick={() => {
+                setLoadingMore(true);
+                setPage((current) => current + 1);
+              }}
+            >
+              {loadingMore ? "loading…" : "load more articles"} <ArrowRight size={16} />
             </button>
           )}
         </>
@@ -114,7 +211,7 @@ export function Articles() {
           <button
             onClick={() => {
               setSearch("");
-              setCategory("All");
+              setCategory("");
             }}
           >
             clear filters
@@ -128,116 +225,278 @@ export function Articles() {
 export function ArticleDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { articles, role, voted, requestVote, castVote } = useApp();
-  const article = articles.find((a) => a.id === id);
+  const { articles, role, voted, votingStatus, requestVote, castVote } = useApp();
+  const [article, setArticle] = useState<ArticleDetailDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [success, setSuccess] = useState(false);
-  if (!article) return <NotFound />;
-  const hasVoted = voted.includes(article.id);
-  const vote = () => {
-    if (role === "guest") return requestVote(article.id);
-    if (castVote(article.id)) {
-      setConfirm(false);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 2800);
+  const [liveResult, setLiveResult] = useState<ArticleVoteResultDto | null>(null);
+  const [submittingVote, setSubmittingVote] = useState(false);
+  const [voteError, setVoteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setVoteError(null);
+    setConfirm(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    getArticle(id, controller.signal)
+      .then((response) => setArticle(response))
+      .catch((requestError) => {
+        if (controller.signal.aborted) return;
+        setError(
+          requestError instanceof ApiError && requestError.status === 404
+            ? "This article is not published."
+            : requestError instanceof ApiUnavailableError
+              ? "The MINERVA API is unreachable."
+              : "Unable to load this article right now.",
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [id]);
+
+  useEffect(() => {
+    if (role === "guest" || !article?.id) {
+      setLiveResult(null);
+      return;
+    }
+
+    const articleId = article.id;
+    const controller = new AbortController();
+
+    const fetchResults = () => {
+      getArticleVoteResults(articleId, controller.signal)
+        .then((result) => {
+          if (!controller.signal.aborted) setLiveResult(result);
+        })
+        .catch(() => {
+          // Retain last known result if background polling fails.
+        });
+    };
+
+    fetchResults();
+
+    const interval = votingStatus?.is_open ? window.setInterval(fetchResults, 20000) : undefined;
+
+    return () => {
+      controller.abort();
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, [role, article?.id, votingStatus?.is_open]);
+
+  if (loading) {
+    return (
+      <div className="empty-state">
+        <span>◉</span>
+        <h2>opening the article.</h2>
+        <p>Fetching the published record from the editorial desk.</p>
+      </div>
+    );
+  }
+
+  if (error || !article) {
+    return (
+      <div className="empty-state">
+        <span>◉</span>
+        <h2>{error ?? "This article could not be found."}</h2>
+        <p>It may have been unpublished or the link is incorrect.</p>
+        <Link className="btn" to="/articles">
+          back to library
+        </Link>
+      </div>
+    );
+  }
+
+  const mapped = mapArticle(article);
+  const rank =
+    [...articles]
+      .sort((a, b) => b.votes - a.votes)
+      .findIndex((a) => a.id === mapped.id) + 1;
+  const windowState =
+    liveResult?.voting_status ??
+    votingStatus?.status ??
+    (mapped.voting === "open" ? "open" : "closed");
+  const hasVoted = Boolean(liveResult?.has_voted) || voted.includes(mapped.id);
+  const voteCount = liveResult?.vote_count ?? mapped.votes;
+  const displayRank = liveResult?.rank ?? (rank > 0 ? rank : null);
+
+  const vote = async () => {
+    if (role === "guest") {
+      requestVote(mapped.id);
+      return;
+    }
+
+    setSubmittingVote(true);
+    setVoteError(null);
+
+    try {
+      const outcome = await castVote(mapped.id);
+      if (outcome.ok) {
+        setLiveResult((current) => ({
+          article_id: mapped.id,
+          slug: mapped.slug,
+          title: mapped.title,
+          vote_count: outcome.voteCount,
+          rank: current?.rank ?? displayRank,
+          has_voted: true,
+          voting_status: windowState,
+          updated_at: new Date().toISOString(),
+        }));
+        setConfirm(false);
+        setSuccess(true);
+        window.setTimeout(() => setSuccess(false), 3000);
+      } else {
+        setVoteError(outcome.message);
+        if (
+          outcome.code === "vote_already_cast" ||
+          outcome.code === "voting_period_inactive"
+        ) {
+          setConfirm(false);
+        }
+      }
+    } finally {
+      setSubmittingVote(false);
     }
   };
+
+  const paragraphs = (article.body || "")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
   return (
     <article className="article-detail">
       <div className="article-crumb">
         <button onClick={() => navigate(-1)}>
           <ArrowLeft size={15} /> back to library
         </button>
-        <span>{article.category}</span>
+        <span>{mapped.category}</span>
       </div>
       <header>
-        <span className="eyebrow">field note · {article.date}</span>
-        <h1>{article.title}</h1>
+        <span className="eyebrow">field note · {mapped.date}</span>
+        <h1>{mapped.title}</h1>
         <div className="byline">
           <span>
-            Written by <strong>{article.author}</strong>
+            Written by <strong>{mapped.author}</strong>
           </span>
-          <span>{article.faculty}</span>
-          <span>8 minute read</span>
+          <span>{mapped.faculty}</span>
+          {mapped.is_featured && <span>featured</span>}
         </div>
       </header>
       <figure className="cover">
-        <img src={article.image} alt="Scientific research connected to the article" />
+        <img src={mapped.image} alt="Scientific research connected to the article" />
         <figcaption>MINERVA editorial series · 2025</figcaption>
       </figure>
       <div className="article-layout">
         <div className="prose">
-          <p className="lead">{article.excerpt}</p>
-          <p>
-            Scientific progress often arrives dressed as certainty. Yet the most meaningful advances
-            begin with a question — patient, precise, and willing to challenge the assumptions
-            beneath familiar systems. This essay follows that question from the laboratory into the
-            lives it may eventually change.
-          </p>
-          <h2>Looking beyond the instrument</h2>
-          <p>
-            Technology is never simply a tool. It carries the priorities of its makers, the limits
-            of its training, and the social conditions in which it is used. To understand its
-            promise, we must also understand the people who might be overlooked by it.
-          </p>
-          <blockquote>
-            “Wisdom is not knowing every answer. It is learning which questions deserve our deepest
-            attention.”
-          </blockquote>
-          <p>
-            For Sri Lankan students, this is more than an abstract debate. Resource constraints can
-            create extraordinary ingenuity, but they also make responsible design essential. Systems
-            should be explainable, resilient, and made for the realities of the communities they
-            intend to serve.
-          </p>
-          <h2>A more public science</h2>
-          <p>
-            Communication is part of the research process, not an afterthought. When an idea can be
-            explained without losing its nuance, it becomes available for scrutiny, collaboration
-            and trust. That is the work this series hopes to celebrate.
-          </p>
-          <div className="documents">
-            <h3>Further reading.</h3>
-            <a href="#" onClick={(e) => e.preventDefault()}>
-              <Download />
-              <span>
-                <strong>Article references</strong>
-                <small>PDF · 1.8 MB</small>
-              </span>
-              <ArrowRight />
-            </a>
-          </div>
+          <p className="lead">{mapped.excerpt}</p>
+          {paragraphs.map((block, index) =>
+            index === 0 ? (
+              <p key={index}>{block}</p>
+            ) : (
+              <p key={index}>{block}</p>
+            ),
+          )}
+          {article.attachments && article.attachments.length > 0 && (
+            <div className="documents">
+              <h3>Research Attachments &amp; Downloads</h3>
+              {article.attachments.map((attachment) => (
+                <a
+                  className="attachment-row"
+                  key={attachment.id}
+                  href={
+                    attachment.download_url ||
+                    getAttachmentDownloadUrl(article.id, attachment.id)
+                  }
+                  download={attachment.original_name}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Download />
+                  <span>
+                    <strong>{attachment.original_name}</strong>
+                    <small>
+                      {attachment.kind} · {attachment.mime_type} ·{" "}
+                      {formatAttachmentSize(attachment.size_bytes)}
+                    </small>
+                  </span>
+                </a>
+              ))}
+            </div>
+          )}
         </div>
         <aside className="vote-panel">
           <span className="eyebrow">the public ballot.</span>
-          <div className="vote-count">
-            <strong>{article.votes}</strong>
-            <span>
-              votes cast
-              <br />
-              rank #
-              {[...articles]
-                .sort((a, b) => b.votes - a.votes)
-                .findIndex((a) => a.id === article.id) + 1}
-            </span>
+          {role === "guest" ? (
+            <div className="vote-count">
+              <strong>—</strong>
+              <span>
+                members ballot
+                <br />
+                sign in to view live tally
+              </span>
+            </div>
+          ) : (
+            <div className="vote-count">
+              <strong>{voteCount}</strong>
+              <span>
+                votes cast
+                <br />
+                rank #{displayRank ?? "—"}
+              </span>
+            </div>
+          )}
+          <div className={`status-line ${windowState === "open" ? "open" : "closed"}`}>
+            {windowState === "open"
+              ? "voting is open"
+              : windowState === "upcoming"
+                ? "voting opens soon"
+                : "voting has closed"}
           </div>
-          <div className={`status-line ${article.voting}`}>
-            {article.voting === "open" ? "voting is open" : "voting has closed"}
-          </div>
-          {article.voting === "closed" ? (
-            <button className="btn full" disabled>
-              voting closed
-            </button>
-          ) : hasVoted ? (
+          {votingStatus?.period && (
+            <p>
+              {votingStatus.period.name} ·{" "}
+              {new Date(votingStatus.period.starts_at).toLocaleDateString("en-US", {
+                day: "2-digit",
+                month: "short",
+              })}{" "}
+              –{" "}
+              {new Date(votingStatus.period.ends_at).toLocaleDateString("en-US", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              })}
+            </p>
+          )}
+          {voteError && (
+            <p className="field-error" role="alert">
+              {voteError}
+            </p>
+          )}
+          {hasVoted ? (
             <div className="recorded">
               <Medal />
               <strong>vote recorded</strong>
               <small>Your choice is sealed.</small>
             </div>
+          ) : windowState !== "open" ? (
+            <button className="btn full" disabled>
+              {windowState === "upcoming" ? "voting opens soon" : "voting closed"}
+            </button>
           ) : (
             <button
               className="btn full"
-              onClick={() => (role === "guest" ? vote() : setConfirm(true))}
+              onClick={() => (role === "guest" ? void vote() : setConfirm(true))}
             >
               {role === "guest" ? "sign in to vote" : "cast your vote"} <ArrowRight size={16} />
             </button>
@@ -245,11 +504,12 @@ export function ArticleDetail() {
           <p>One vote per participant. Votes are permanent and publicly counted.</p>
         </aside>
       </div>
+      <CommentSection articleId={article.id} />
       <section className="related">
         <span className="eyebrow">continue reading.</span>
         <div>
           {articles
-            .filter((a) => a.id !== article.id && a.status === "published")
+            .filter((a) => a.id !== mapped.id && a.status === "published")
             .slice(0, 3)
             .map((a, i) => (
               <ArticleCard article={a} key={a.id} index={i + 1} compact />
@@ -259,25 +519,41 @@ export function ArticleDetail() {
       {confirm && (
         <div className="modal-backdrop">
           <div className="confirm-modal">
-            <button className="modal-close" onClick={() => setConfirm(false)}>
+            <button
+              className="modal-close"
+              disabled={submittingVote}
+              onClick={() => setConfirm(false)}
+            >
               <X />
             </button>
             <span className="eyebrow">your ballot.</span>
             <h2>Make this choice count?</h2>
-            <p>You are voting for “{article.title}”. This action cannot be undone.</p>
+            <p>
+              You are voting for “{mapped.title}”. Votes are final and cannot be changed,
+              withdrawn, or resubmitted.
+            </p>
+            {voteError && (
+              <p className="field-error" role="alert">
+                {voteError}
+              </p>
+            )}
             <div>
-              <button className="btn outline" onClick={() => setConfirm(false)}>
+              <button
+                className="btn outline"
+                disabled={submittingVote}
+                onClick={() => setConfirm(false)}
+              >
                 not yet
               </button>
-              <button className="btn" onClick={vote}>
-                seal my vote
+              <button className="btn" disabled={submittingVote} onClick={() => void vote()}>
+                {submittingVote ? "sealing…" : "seal my vote"}
               </button>
             </div>
           </div>
         </div>
       )}
       {success && (
-        <div className="vote-toast">
+        <div className="vote-toast" role="status" aria-live="polite">
           <Medal />
           <div>
             <strong>Vote recorded</strong>
@@ -290,40 +566,150 @@ export function ArticleDetail() {
 }
 
 export function Leaderboard() {
-  const { articles } = useApp();
-  const sorted = [...articles]
-    .filter((a) => a.status === "published")
-    .sort((a, b) => b.votes - a.votes);
-  const max = sorted[0]?.votes || 1;
+  const { role, votingStatus } = useApp();
+  const [entries, setEntries] = useState<LeaderboardEntryDto[]>([]);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const retry = useCallback(() => {
+    setReloadToken((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    if (role === "guest") {
+      setEntries([]);
+      setUpdatedAt(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    const loadBoard = (isInitial: boolean) => {
+      getLeaderboard(controller.signal)
+        .then((response) => {
+          if (controller.signal.aborted) return;
+          setEntries(response.entries);
+          setUpdatedAt(response.updated_at ?? null);
+          setError(null);
+        })
+        .catch((requestError) => {
+          if (controller.signal.aborted || !isInitial) return;
+          setError(
+            requestError instanceof ApiUnavailableError
+              ? "The MINERVA API is unreachable right now."
+              : requestError instanceof ApiError
+                ? requestError.message
+                : "Unable to load live standings.",
+          );
+        })
+        .finally(() => {
+          if (isInitial && !controller.signal.aborted) setLoading(false);
+        });
+    };
+
+    loadBoard(true);
+
+    const interval = votingStatus?.is_open
+      ? window.setInterval(() => loadBoard(false), 20000)
+      : undefined;
+
+    return () => {
+      controller.abort();
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, [role, votingStatus?.is_open, reloadToken]);
+
+  if (role === "guest") {
+    return (
+      <div className="page leaderboard-page">
+        <header className="editorial-header">
+          <span className="eyebrow">members-only live count</span>
+          <h1>the standing.</h1>
+          <p>
+            Every voice, counted in public. Sign in as a registered participant to view live
+            standings and vote tallies.
+          </p>
+        </header>
+        <div className="empty-state">
+          <span>◉</span>
+          <h2>live results require sign-in.</h2>
+          <p>Only registered participants can inspect live voting standings.</p>
+          <Link className="btn" to="/login">
+            sign in to view standings
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const max = entries[0]?.vote_count || 1;
+  const refreshedLabel = updatedAt
+    ? new Date(updatedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+    : "just now";
+
   return (
     <div className="page leaderboard-page">
       <header className="editorial-header">
-        <span className="eyebrow">live public count · refreshed just now</span>
+        <span className="eyebrow">live public count · refreshed {refreshedLabel}</span>
         <h1>the standing.</h1>
         <p>
           Every voice, counted in public. The leading article will receive MINERVA’s Most Popular
           Article award.
         </p>
       </header>
-      <div className="leader-table">
-        <div className="leader-table-head">
-          <span>Rank / Article</span>
-          <span>Category</span>
-          <span>Public votes</span>
+      {loading ? (
+        <div className="empty-state">
+          <span>◉</span>
+          <h2>counting the ballots.</h2>
+          <p>Loading live article standings.</p>
         </div>
-        {sorted.map((a, i) => (
-          <Link to={`/articles/${a.id}`} key={a.id} className={i < 3 ? `medal medal-${i + 1}` : ""}>
-            <strong>{String(i + 1).padStart(2, "0")}</strong>
-            <div>
-              <h3>{a.title}</h3>
-              <small>{a.author}</small>
-              <i style={{ width: `${max ? (a.votes / max) * 100 : 0}%` }} />
-            </div>
-            <span>{a.category}</span>
-            <b>{a.votes}</b>
-          </Link>
-        ))}
-      </div>
+      ) : error ? (
+        <div className="empty-state">
+          <span>◉</span>
+          <h2>standings unavailable.</h2>
+          <p>{error}</p>
+          <button onClick={retry}>retry</button>
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="empty-state">
+          <span>◉</span>
+          <h2>no published articles yet.</h2>
+          <p>Standings will appear once essays are published.</p>
+        </div>
+      ) : (
+        <div className="leader-table">
+          <div className="leader-table-head">
+            <span>Rank / Article</span>
+            <span>Category</span>
+            <span>Public votes</span>
+          </div>
+          {entries.map((entry, i) => (
+            <Link
+              to={`/articles/${entry.slug || entry.article_id}`}
+              key={entry.article_id}
+              className={i < 3 ? `medal medal-${i + 1}` : ""}
+            >
+              <strong>{String(entry.rank).padStart(2, "0")}</strong>
+              <div>
+                <h3>{entry.title}</h3>
+                <small>
+                  {entry.author?.name ?? "Unknown author"}
+                  {entry.has_voted ? " · voted" : ""}
+                </small>
+                <i style={{ width: `${max ? (entry.vote_count / max) * 100 : 0}%` }} />
+              </div>
+              <span>{entry.category?.name ?? "Uncategorized"}</span>
+              <b>{entry.vote_count}</b>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
