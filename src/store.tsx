@@ -1,4 +1,11 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { initialArticles, type Article } from "./data";
 
 type Role = "guest" | "participant" | "admin";
@@ -33,11 +40,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [pendingVote, setPendingVote] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
 
-  const setRole = (next: Role) => {
-    setRoleState(next);
-    localStorage.setItem("minerva-role", next);
-    if (next !== "guest" && pendingVote) setAuthOpen(false);
-  };
+  const setRole = useCallback(
+    (next: Role) => {
+      setRoleState(next);
+      localStorage.setItem("minerva-role", next);
+      if (next !== "guest" && pendingVote) setAuthOpen(false);
+    },
+    [pendingVote],
+  );
   const requestVote = (id: string) => {
     if (role === "guest") {
       setPendingVote(id);
@@ -88,7 +98,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unread,
       markRead: () => setUnread(0),
     }),
-    [role, articles, voted, authOpen, pendingVote, unread],
+    [role, setRole, articles, voted, authOpen, pendingVote, unread],
   );
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

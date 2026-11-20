@@ -1,7 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, ShieldCheck, UserRound } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Brand } from "../components/Brand";
+import { GoogleAuthButton } from "../components/GoogleAuthButton";
+import { API_BASE_URL } from "../lib/api";
 import { useApp } from "../store";
 
 function AuthVisual() {
@@ -107,6 +109,12 @@ export function Login() {
             </span>
           </button>
         </div>
+        {signInRole === "participant" && (
+          <>
+            <GoogleAuthButton />
+            <div className="auth-divider">or sign in with email</div>
+          </>
+        )}
         <form onSubmit={submit}>
           <label>
             Email address
@@ -206,6 +214,12 @@ export function Register() {
             </span>
           </button>
         </div>
+        {accountRole === "participant" && (
+          <>
+            <GoogleAuthButton />
+            <div className="auth-divider">or register with email</div>
+          </>
+        )}
         <form onSubmit={submit}>
           <label>
             Full name
@@ -333,6 +347,117 @@ export function ForgotPassword() {
             </form>
           </>
         )}
+      </main>
+    </div>
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isParticipantProfile(payload: unknown): boolean {
+  if (!isRecord(payload) || !isRecord(payload.data)) return false;
+
+  const roles = payload.data.roles;
+  const capabilities = payload.data.capabilities;
+  return (
+    (Array.isArray(roles) && roles.includes("participant")) ||
+    (isRecord(capabilities) && capabilities.is_participant === true)
+  );
+}
+
+function googleFailureMessage(reason: string | null): string {
+  if (reason === "access_denied") return "Google sign-in was cancelled. You can try again.";
+  return "Google sign-in could not be completed. Please try again.";
+}
+
+export function GoogleAuthCallback() {
+  const { setRole } = useApp();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    const params = new URLSearchParams(location.search);
+
+    if (params.get("auth") !== "success") {
+      setError(googleFailureMessage(params.get("reason")));
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    const completeSignIn = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/me`, {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        const payload: unknown = await response.json();
+
+        if (!response.ok || !isParticipantProfile(payload)) {
+          throw new Error("The Google session could not be verified.");
+        }
+
+        if (active) {
+          setRole("participant");
+          navigate("/dashboard", { replace: true });
+        }
+      } catch (error) {
+        console.error("Could not complete Google sign-in.", error);
+        if (active) {
+          setError("We couldn't verify your Google session. Please try again.");
+          setLoading(false);
+        }
+      }
+    };
+
+    void completeSignIn();
+
+    return () => {
+      active = false;
+    };
+  }, [location.search, navigate, setRole]);
+
+  return (
+    <div className="auth-page">
+      <AuthVisual />
+      <main className="auth-form">
+        <Link to="/login" className="back">
+          <ArrowLeft /> back to sign in
+        </Link>
+        <div className="google-callback-state">
+          <span className="eyebrow">participant access.</span>
+          <h1>
+            {loading ? (
+              <>
+                Completing your
+                <br />
+                <em>sign in…</em>
+              </>
+            ) : (
+              <>
+                Google sign-in
+                <br />
+                <em>needs attention.</em>
+              </>
+            )}
+          </h1>
+          {error ? (
+            <>
+              <p role="alert">{error}</p>
+              <Link className="btn" to="/login">
+                return to sign in
+              </Link>
+            </>
+          ) : (
+            <p>Verifying your account securely with MINERVA.</p>
+          )}
+        </div>
       </main>
     </div>
   );

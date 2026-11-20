@@ -19,6 +19,9 @@ const Register = lazy(() => import("../pages/Auth").then((m) => ({ default: m.Re
 const ForgotPassword = lazy(() =>
   import("../pages/Auth").then((m) => ({ default: m.ForgotPassword })),
 );
+const GoogleAuthCallback = lazy(() =>
+  import("../pages/Auth").then((m) => ({ default: m.GoogleAuthCallback })),
+);
 const Dashboard = lazy(() =>
   import("../pages/Participant").then((m) => ({ default: m.Dashboard })),
 );
@@ -73,6 +76,7 @@ export const router = createBrowserRouter([
   { path: "/login", Component: Login },
   { path: "/register", Component: Register },
   { path: "/forgot-password", Component: ForgotPassword },
+  { path: "/auth/callback", Component: GoogleAuthCallback },
   {
     Component: () => <RoleShell requiredRole="participant" />,
     children: [

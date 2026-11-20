@@ -1599,6 +1599,70 @@
   font-size: 7px;
   letter-spacing: 0.05em;
 }
+.google-auth {
+  margin-top: 20px;
+}
+.google-auth-button {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
+}
+.google-auth-button:hover:not(:disabled) {
+  border-color: var(--bronze);
+  background: #fcfbf8;
+}
+.google-auth-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+.google-auth-button svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.google-auth-error {
+  margin: 10px 0 0;
+  color: #a33b2f;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  color: var(--stone);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.google-callback-state {
+  margin-top: 10px;
+}
+.google-callback-state p[role="alert"] {
+  color: #a33b2f;
+}
+.google-callback-state .btn {
+  margin-top: 12px;
+}
 .registration-role {
   margin-top: 25px;
 }
