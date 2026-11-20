@@ -116,6 +116,18 @@ export async function forgotStaffPassword(email: string): Promise<void> {
   });
 }
 
+export async function resetStaffPassword(payload: {
+  token: string;
+  email: string;
+  password: string;
+  password_confirmation: string;
+}): Promise<void> {
+  await apiRequest<{ message?: string }>("/auth/staff/reset-password", {
+    method: "POST",
+    body: payload,
+  });
+}
+
 export async function logoutSession(): Promise<void> {
   await apiRequest<{ message?: string }>("/auth/logout", { method: "POST" });
 }

@@ -111,7 +111,7 @@ An administrator has platform-wide management authority.
 - Manage user accounts and roles.
 - Grant and revoke publisher permissions.
 - Configure publishing permissions, including direct-publishing access.
-- Create, edit, approve, reject, publish, unpublish and feature articles.
+- Create, edit, publish, unpublish and feature articles.
 - View platform-wide voting and article analytics.
 - Monitor and moderate comments.
 - Remove inappropriate comments.
@@ -164,24 +164,21 @@ An administrator has platform-wide management authority.
 
 **FR-18:** Administrators shall be able to grant or revoke publishing permissions for selected registered users.
 
-**FR-19:** Administrators shall be able to configure whether an authorized publisher may publish directly or must submit articles for approval.
+**FR-19:** Authorized publishers shall be permitted to publish their own articles directly without an editorial review queue.
 
-**FR-20:** Authorized publishers shall be able to create and submit articles through the publisher dashboard.
+**FR-20:** Authorized publishers shall be able to create and publish articles through the publisher dashboard.
 
-**FR-21:** Publishers shall be able to edit their own articles according to their assigned permissions and the article's current status.
+**FR-21:** Publishers shall be able to edit their own draft articles according to their assigned permissions.
 
-**FR-22:** The system shall support the following editorial workflow:
+**FR-22:** The system shall support the following article lifecycle statuses:
 
 - Draft
-- Pending Review
-- Approved
-- Rejected
 - Published
 - Unpublished
 
-**FR-23:** Administrators shall be able to review submitted articles and approve or reject them.
+**FR-23:** *(Removed — no editorial review queue; publishers publish directly.)*
 
-**FR-24:** Administrators shall be able to publish, unpublish and feature articles.
+**FR-24:** Only administrators shall be able to unpublish (remove) any published article, republish an unpublished article, or feature articles.
 
 **FR-25:** Only published articles shall be visible to public visitors as competition entries.
 
@@ -273,10 +270,9 @@ An administrator has platform-wide management authority.
 | Comment on articles | No | Yes | Yes, if logged in | Yes |
 | Moderate comments | No | No | No, unless separately authorized | Yes |
 | Create articles | No | No | Yes | Yes |
-| Submit articles for review | No | No | Yes | Yes |
-| Approve or reject articles | No | No | No | Yes |
-| Publish articles | No | No | Only if granted direct-publishing permission | Yes |
-| Feature or unpublish articles | No | No | No | Yes |
+| Publish own articles directly | No | No | Yes | Yes |
+| Unpublish / remove any published article | No | No | No | Yes |
+| Feature or republish articles | No | No | No | Yes |
 | View own article analytics | No | No | Yes | Yes |
 | View other publishers' private analytics | No | No | No | Yes |
 | Grant publisher permissions | No | No | No | Yes |
@@ -300,18 +296,14 @@ An administrator has platform-wide management authority.
 
 ### 6.2 Article Publishing Workflow
 
-1. Administrator creates a publisher account or selects an existing registered user.
-2. Administrator grants article publishing permission.
-3. Administrator configures the publisher's allowed publishing mode.
-4. Authorized publisher logs in.
-5. Publisher creates an article.
-6. Publisher saves the article as a draft.
-7. Publisher submits the article for review, if required.
-8. Administrator reviews the article.
-9. Administrator approves or rejects the article.
-10. An approved article is published by the administrator or by the publisher if direct-publishing permission has been granted.
-11. Published article becomes visible on the public competition page.
-12. Publisher can view analytics for their own article.
+1. Administrator creates a publisher account or grants publishing permissions to a staff user.
+2. Authorized publisher logs in.
+3. Publisher creates an article and saves it as a draft.
+4. Publisher edits the draft and uploads attachments as needed.
+5. Publisher publishes the article directly (`draft` -> `published`).
+6. Published article becomes immediately visible on the public competition page.
+7. Publisher can view analytics for their own article.
+8. Only administrators can unpublish/remove any published article (`published` -> `unpublished`) or feature articles.
 
 ### 6.3 Voting Workflow
 

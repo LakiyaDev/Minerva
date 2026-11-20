@@ -57,8 +57,6 @@ it('rejects posting a comment to a draft or pending article', function (ArticleS
     expect(Comment::query()->count())->toBe(0);
 })->with([
     'draft' => [ArticleStatus::Draft],
-    'pending_review' => [ArticleStatus::PendingReview],
-    'rejected' => [ArticleStatus::Rejected],
     'unpublished' => [ArticleStatus::Unpublished],
 ]);
 

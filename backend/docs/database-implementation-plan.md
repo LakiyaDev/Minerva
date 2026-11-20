@@ -99,22 +99,34 @@ the authoritative gap analysis.
 
 ## 3. Execution plan
 
-### Phase 0 — Environment (MariaDB)
+### Phase 0 — Environment (MariaDB) ✅ done
 
-1. `pacman -S mariadb mariadb-clients`
-2. `mariadb-install-db --user=mysql --datadir=/var/lib/mysql`
-3. `systemctl enable --now mariadb`
-4. Create the application database and least-privilege user:
+1. `pacman -S mariadb mariadb-clients` — installed (13.0.2).
+2. `mariadb-install-db` — data directory initialised.
+3. **The system service was not used.** `systemctl enable --now mariadb` needs an
+   interactive polkit prompt (`sudo` is unusable in this environment), so a
+   user-owned instance runs instead:
+   ```bash
+   mariadb-install-db --datadir=$HOME/.local/share/minerva-mariadb
+   mariadbd --datadir=$HOME/.local/share/minerva-mariadb \
+            --socket=/tmp/opencode/mariadb-run/mysqld.sock \
+            --port=3307 --bind-address=127.0.0.1
+   ```
+   Production stays on the system `mariadb`/`mysql` service on 3306.
+4. The application database and least-privilege user are created by
+   `scripts/create-database.sh`:
    ```sql
    CREATE DATABASE minerva CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
    CREATE USER 'minerva'@'127.0.0.1' IDENTIFIED BY '<secret from .env>';
    GRANT ALL PRIVILEGES ON minerva.* TO 'minerva'@'127.0.0.1';
    ```
-5. `backend/.env` → `DB_CONNECTION=mysql`, `DB_HOST=127.0.0.1`, `DB_PORT=3306`,
-   `DB_DATABASE=minerva`, `DB_USERNAME=minerva`, `DB_PASSWORD=…`
-6. Verify: `php artisan db:show` reports InnoDB + `utf8mb4_unicode_ci`.
+5. `backend/.env` → `DB_CONNECTION=mysql`, `DB_HOST=127.0.0.1`, `DB_PORT=3307`
+   (local instance), `DB_DATABASE=minerva`, `DB_USERNAME=minerva`,
+   `DB_PASSWORD=…`
+6. Verified: `php artisan db:show` reports InnoDB + `utf8mb4_unicode_ci`, and
+   `scripts/verify-schema.php` asserts both on every table.
 
-### Phase 1 — Conformance edits to existing migrations (C1–C10)
+### Phase 1 — Conformance edits to existing migrations (C1–C10) ✅ done
 
 The project is pre-production, so the existing *create* migrations are edited
 in place rather than followed by a trail of `ALTER` migrations. Every
@@ -123,21 +135,23 @@ developer then runs `php artisan migrate:fresh --seed`.
 | Migration | Edit |
 |---|---|
 | Identity `…000001_create_users_table` | drop `softDeletes()`; index `is_active` alone |
-| Identity `…000003_create_access_control_tables` | portable "one active publisher grant" index (MySQL functional index, SQLite partial index) |
-| Articles `…000020_create_article_categories_table` | `name` 120, `slug` 140 |
+| Identity `…000003_create_access_control_tables` | `permission_role` PK order → `(role_id, permission_id)`; `publisher_permissions` → `UNIQUE(user_id)` (the doc's own §4.1.8 strategy) |
+| Articles `…000020_create_article_categories_table` | `name` 120, `slug` 140; `description` → `string(500)` |
 | Articles `…000021_create_articles_table` | drop `softDeletes()`; `body` → `mediumText()` |
 | Articles `…000022_create_article_attachments_table` | `storage_disk` 32 + default `s3`; `kind` 20 |
 | Articles `…000023_create_article_status_history_table` | `reason` → `string(500)` |
 | Voting `…000030_create_voting_periods_table` | `CHECK (ends_at > starts_at)` |
-| Audit `…000010_create_audit_logs_table` | `actor_id` FK → `users.id` `SET NULL` |
+| Audit `…000010_create_audit_logs_table` | `actor_id` FK → `users.id` `SET NULL`; `ip_hash` → `char(64)`; index → `(action, created_at)` |
+| Identity `…000004_create_identity_security_tables` | `personal_access_tokens.id` → standard Sanctum auto-increment `id` |
 
 Model/service follow-ups for C1:
 `User` (drop `SoftDeletes`), `Article` (drop `SoftDeletes`),
 `ArticleWorkflowService::generateSlug()` (no `withTrashed`),
 `UserManagementService`, `RoleService`, `StaffInvitationService`,
-`GoogleAuthenticationService` (drop the trashed-user branches).
+`GoogleAuthenticationService` (drop the trashed-user branches),
+`PublisherPermissionService::grant()` (re-grant updates the single row).
 
-### Phase 2 — New tables
+### Phase 2 — New tables ✅ done
 
 New migrations (ordered after the existing ones so a fresh migrate resolves
 every FK):
@@ -149,39 +163,49 @@ every FK):
 | `2026_01_01_000050_create_api_keys_table` | `api_keys` |
 
 New modules: `App\Modules\Content` and `App\Modules\Integrations`, each with
-its own `Database/Migrations`, `Models`, `Providers` and `Routes/api.php`,
-wired into `bootstrap/providers.php` and `routes/api.php` exactly like the
-existing modules.
+its own `Database/Migrations`, `Models` and `Providers`, wired into
+`bootstrap/providers.php` exactly like the existing modules.
 
-### Phase 3 — Models & seeders
+Route files are deliberately **not** added yet: a module route file needs
+controllers behind it, and this task was schema creation. The modules are
+registered (migrations load), so when the Content/Integrations modules are
+built their `Routes/api.php` drop into `routes/api.php` like every other
+module's.
+
+### Phase 3 — Models & seeders ✅ done
 
 - Models: `Workshop`, `WorkshopResource`, `TimelineEvent`, `Sponsor`,
   `CommitteeMember`, `MagazinePublication`, `EMagazineFile`,
   `PlatformSetting`, `ApiKey`.
-- Seeders: `UniversitySeeder` (approved university lookup list),
+- Seeders: `UniversitySeeder` (approved university lookup list, read from
+  `database/data/universities.php` so the organising committee owns the list),
   `PlatformSettingSeeder` (FR-10 default groups), plus the existing
   `RolePermissionSeeder` and `ArticleCategorySeeder`.
 - `DatabaseSeeder` calls all four in dependency order.
 
-### Phase 4 — Bootstrap & verification tooling
+### Phase 4 — Bootstrap & verification tooling ✅ done
 
 - `backend/scripts/create-database.sh` — one command: create the database and
-  user on a fresh MariaDB/MySQL server, point `.env` at it, run
-  `migrate --seed`.
-- `backend/scripts/verify-schema.php` — reads `information_schema` and
-  asserts every table, column, index, unique constraint, FK action and CHECK
-  constraint from the doc. Exits non-zero on any deviation.
+  user on a fresh MariaDB/MySQL server, run `migrate --seed` (or
+  `migrate:fresh --seed` with `--fresh`), then run the verifier.
+  `--dry-run` prints the SQL with the password redacted.
+- `backend/scripts/verify-schema.php` — reads the live schema and asserts
+  every table, column (+ type), nullability, default, unique constraint,
+  index, FK `ON DELETE` action and CHECK constraint from the doc. Exits
+  non-zero on any deviation. Type matching is strict on MySQL/MariaDB and
+  family-based on SQLite (SQLite collapses `BIGINT`/`SMALLINT`/`INT` to
+  `integer`, `MEDIUMTEXT`/`LONGTEXT` to `text`).
 
-### Phase 5 — Verification
+### Phase 5 — Verification ✅ results
 
-| Check | Command | Expected |
+| Check | Command | Result |
 |---|---|---|
-| Schema matches the doc | `php scripts/verify-schema.php` | 0 deviations |
-| Fresh migrate on MariaDB | `php artisan migrate:fresh --seed` | 29 tables, no errors |
+| Schema matches the doc | `php scripts/verify-schema.php` | 29 tables, 105 assertions, **0 deviations** on MariaDB; same on SQLite |
+| Fresh migrate on MariaDB | `scripts/create-database.sh --fresh` | 29 tables, no errors |
 | Fresh migrate on SQLite | `php artisan migrate:fresh --seed` | 29 tables, no errors (portability) |
-| Test suite | `php artisan test` | all green |
-| Formatter | `vendor/bin/pint --test` | pass |
-| Engine / collation | `php artisan db:show` | InnoDB, `utf8mb4_unicode_ci` |
+| Test suite | `php artisan test` | **140 passed** (571 assertions) — SQLite `:memory:`, unaffected by the engine switch |
+| Formatter | `vendor/bin/pint --test` | pass on every file this change touched |
+| Engine / collation | `php artisan db:show` | InnoDB, `utf8mb4_unicode_ci` on all 39 tables (29 domain + framework) |
 
 ---
 

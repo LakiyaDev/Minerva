@@ -18,7 +18,6 @@ import {
   Paperclip,
   Plus,
   Search,
-  Send,
   Trash2,
   TrendingUp,
   Upload,
@@ -57,7 +56,7 @@ function formatTimestamp(value?: string): string {
 }
 
 export function PublisherDashboard() {
-  const { loadPublisherArticles, submitForReview, publishOwn, canPublishDirectly } = useApp();
+  const { loadPublisherArticles, publishOwn } = useApp();
   const [rows, setRows] = useState<Article[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ArticleStatus | "">("");
@@ -139,9 +138,8 @@ export function PublisherDashboard() {
   const counts = {
     total: rows.length,
     drafts: rows.filter((a) => a.status === "draft").length,
-    pending: rows.filter((a) => a.status === "pending_review").length,
-    rejected: rows.filter((a) => a.status === "rejected").length,
     published: rows.filter((a) => a.status === "published").length,
+    unpublished: rows.filter((a) => a.status === "unpublished").length,
   };
 
   const filtered = rows.filter(
@@ -183,9 +181,8 @@ export function PublisherDashboard() {
         {[
           [counts.total, "total articles"],
           [counts.drafts, "drafts"],
-          [counts.pending, "pending review"],
-          [counts.rejected, "needs revision"],
           [counts.published, "published"],
+          [counts.unpublished, "removed by admin"],
         ].map(([value, label]) => (
           <div className="stat-card" key={label}>
             <strong>{value}</strong>
@@ -230,9 +227,7 @@ export function PublisherDashboard() {
           <p className="empty-state-copy">No articles yet. Create your first draft.</p>
         ) : (
           filtered.map((a) => {
-            const editable = a.status === "draft" || a.status === "rejected";
-            const canDirectPublish =
-              canPublishDirectly && (a.status === "draft" || a.status === "approved");
+            const editable = a.status === "draft";
 
             return (
               <div className="table-row" key={a.id}>
@@ -256,28 +251,11 @@ export function PublisherDashboard() {
                   {editable && (
                     <button
                       type="button"
-                      title="Submit for review"
-                      aria-label="Submit for review"
+                      title="Publish article"
+                      aria-label="Publish article"
                       disabled={busyId === a.id}
                       onClick={() =>
-                        void runAction(
-                          a.id,
-                          () => submitForReview(a.id),
-                          "Article submitted for editorial review.",
-                        )
-                      }
-                    >
-                      <Send />
-                    </button>
-                  )}
-                  {canDirectPublish && (
-                    <button
-                      type="button"
-                      title="Direct publish"
-                      aria-label="Direct publish"
-                      disabled={busyId === a.id}
-                      onClick={() =>
-                        void runAction(a.id, () => publishOwn(a.id), "Article published directly.")
+                        void runAction(a.id, () => publishOwn(a.id), "Article published.")
                       }
                     >
                       <ArrowUpRight />
@@ -405,8 +383,7 @@ export function PublisherArticleEditor() {
   const { id } = useParams();
   const isEditing = Boolean(id);
   const navigate = useNavigate();
-  const { categories, createDraft, updateDraft, submitForReview, publishOwn, canPublishDirectly } =
-    useApp();
+  const { categories, createDraft, updateDraft, publishOwn } = useApp();
 
   const [title, setTitle] = useState("");
   const [abstract, setAbstract] = useState("");
@@ -454,8 +431,7 @@ export function PublisherArticleEditor() {
     return () => controller.abort();
   }, [id]);
 
-  const isEditable = !isEditing || status === "draft" || status === "rejected";
-  const latestRejection = [...history].reverse().find((entry) => entry.to_status === "rejected");
+  const isEditable = !isEditing || status === "draft";
 
   const handleAttachmentUpload = async (files: FileList | null) => {
     if (!id || !isEditable || !files || files.length === 0) return;
@@ -544,19 +520,6 @@ export function PublisherArticleEditor() {
       targetId = saveResult.id ?? "";
     }
 
-    if (intent === "submit" && targetId) {
-      const submitRes = await submitForReview(targetId);
-      setSubmitting(false);
-      if (!submitRes.ok) {
-        navigate("/publisher", {
-          state: { notice: `${submitRes.message} Your draft changes were saved.` },
-        });
-        return;
-      }
-      navigate("/publisher", { state: { notice: "Article submitted for review." } });
-      return;
-    }
-
     if (intent === "publish" && targetId) {
       const publishRes = await publishOwn(targetId);
       setSubmitting(false);
@@ -566,7 +529,7 @@ export function PublisherArticleEditor() {
         });
         return;
       }
-      navigate("/publisher", { state: { notice: "Article published directly." } });
+      navigate("/publisher", { state: { notice: "Article published." } });
       return;
     }
 
@@ -604,14 +567,6 @@ export function PublisherArticleEditor() {
               This article is locked for editing while in {articleStatusLabels[status]} status.
             </small>
           )}
-        </div>
-      )}
-
-      {latestRejection?.reason && (
-        <div className="error-banner" role="alert">
-          <span>
-            <strong>Reviewer feedback:</strong> {latestRejection.reason}
-          </span>
         </div>
       )}
 
@@ -695,10 +650,9 @@ export function PublisherArticleEditor() {
             <header>
               <span>02</span>
               <div>
-                <h2>Workflow actions</h2>
+                <h2>Publishing actions</h2>
                 <p>
-                  Save a private draft, submit to the editorial review queue, or publish directly if
-                  authorized.
+                  Save a private draft to edit later, or publish directly to make your article visible on the platform.
                 </p>
               </div>
             </header>
@@ -706,14 +660,9 @@ export function PublisherArticleEditor() {
               <button className="btn outline" type="submit" value="draft" disabled={submitting}>
                 {submitting ? "saving…" : "save draft"}
               </button>
-              <button className="btn" type="submit" value="submit" disabled={submitting}>
-                <Send size={14} /> submit for review
+              <button className="btn" type="submit" value="publish" disabled={submitting}>
+                <Check size={14} /> publish article
               </button>
-              {canPublishDirectly && (
-                <button className="btn" type="submit" value="publish" disabled={submitting}>
-                  <Check size={14} /> direct publish
-                </button>
-              )}
             </div>
           </section>
         )}

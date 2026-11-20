@@ -10,7 +10,6 @@ import {
 } from "react";
 import { initialArticles, type Article, type ArticleCategory, type ArticleStatus } from "./data";
 import {
-  approveArticle as approveArticleRequest,
   adminPublishArticle as adminPublishArticleRequest,
   createArticleDraft,
   getAdminArticles,
@@ -18,8 +17,6 @@ import {
   getCategories,
   getPublisherArticles,
   publishArticle as publishArticleRequest,
-  rejectArticle as rejectArticleRequest,
-  submitArticleForReview,
   toggleFeatureArticle,
   unpublishArticle as unpublishArticleRequest,
   updateArticleDraft,
@@ -92,10 +89,7 @@ type Store = {
   // Editorial workflow actions (backend-authoritative).
   createDraft: (payload: ArticleDraftPayload) => Promise<EditorialResult>;
   updateDraft: (id: string, payload: ArticleUpdatePayload) => Promise<EditorialResult>;
-  submitForReview: (id: string) => Promise<EditorialResult>;
   publishOwn: (id: string) => Promise<EditorialResult>;
-  approve: (id: string) => Promise<EditorialResult>;
-  reject: (id: string, reason: string) => Promise<EditorialResult>;
   publishAny: (id: string) => Promise<EditorialResult>;
   unpublish: (id: string) => Promise<EditorialResult>;
   toggleFeatured: (id: string, isFeatured: boolean) => Promise<EditorialResult>;
@@ -109,7 +103,7 @@ export function deriveRole(user: MeDto | null): Role {
   if (
     user.roles.includes("administrator") ||
     user.permissions.some((permission) =>
-      ["article.review", "user.manage", "settings.manage"].includes(permission),
+      ["article.unpublish", "article.publish_any", "user.manage", "settings.manage"].includes(permission),
     )
   ) {
     return "admin";
@@ -273,7 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isAdmin =
     role === "admin" ||
     (user?.roles.includes("administrator") ?? false) ||
-    hasPermission("article.review") ||
+    hasPermission("article.unpublish") ||
     hasPermission("user.manage") ||
     hasPermission("settings.manage");
 
@@ -284,7 +278,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     hasPermission("article.create");
 
   const canPublishDirectly =
-    Boolean(user?.capabilities.can_publish_directly) || hasPermission("article.publish_own");
+    isPublisher ||
+    Boolean(user?.capabilities.can_publish_directly) ||
+    hasPermission("article.publish_own");
 
   const requestVote = useCallback(
     (id: string) => {
@@ -520,25 +516,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [runAction],
   );
 
-  const submitForReview = useCallback(
-    async (id: string): Promise<EditorialResult> =>
-      runAction(() => submitArticleForReview(id)),
-    [runAction],
-  );
-
   const publishOwn = useCallback(
     async (id: string): Promise<EditorialResult> => runAction(() => publishArticleRequest(id)),
-    [runAction],
-  );
-
-  const approve = useCallback(
-    async (id: string): Promise<EditorialResult> => runAction(() => approveArticleRequest(id)),
-    [runAction],
-  );
-
-  const reject = useCallback(
-    async (id: string, reason: string): Promise<EditorialResult> =>
-      runAction(() => rejectArticleRequest(id, reason)),
     [runAction],
   );
 
@@ -612,10 +591,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       markRead: () => setUnread(0),
       createDraft,
       updateDraft,
-      submitForReview,
       publishOwn,
-      approve,
-      reject,
       publishAny,
       unpublish,
       toggleFeatured,
@@ -655,10 +631,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unread,
       createDraft,
       updateDraft,
-      submitForReview,
       publishOwn,
-      approve,
-      reject,
       publishAny,
       unpublish,
       toggleFeatured,

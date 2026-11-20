@@ -19,7 +19,7 @@ beforeEach(function (): void {
     seedIdentity();
 });
 
-it('resolves role permissions and keeps publisher direct-publish gated', function (): void {
+it('resolves role permissions and grants publishers direct publishing', function (): void {
     $resolver = app(PermissionResolver::class);
 
     $participant = identityUser('participant');
@@ -28,10 +28,11 @@ it('resolves role permissions and keeps publisher direct-publish gated', functio
     expect($resolver->for($participant))->toContain('participant.vote')
         ->and($resolver->for($participant))->not->toContain('article.create')
         ->and($resolver->for($publisher))->toContain('article.create')
-        ->and($resolver->for($publisher))->not->toContain('article.publish_own');
+        ->and($resolver->for($publisher))->toContain('article.publish_own')
+        ->and($resolver->for($publisher))->not->toContain('article.unpublish');
 });
 
-it('adds article.publish_own only while a publisher grant allows direct publishing', function (): void {
+it('grants publisher role and direct publishing permission to staff users', function (): void {
     $admin = identityUser('administrator');
     $publisher = identityUser('publisher');
     $request = Request::create('/api/v1/admin/users/'.$publisher->getKey().'/publisher-permission', 'POST');
@@ -40,7 +41,7 @@ it('adds article.publish_own only while a publisher grant allows direct publishi
 
     expect($publisher->fresh()->hasPermission('article.publish_own'))->toBeTrue();
 
-    app(PublisherPermissionService::class)->updateDirectPublish($publisher, false, $admin, $request);
+    app(PublisherPermissionService::class)->revoke($publisher->fresh(), $admin, $request);
 
     expect($publisher->fresh()->hasPermission('article.publish_own'))->toBeFalse();
 });

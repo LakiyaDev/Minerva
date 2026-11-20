@@ -20,7 +20,7 @@ final class ArticlePolicy
     public function viewOwn(User $user, Article $article): bool
     {
         return $this->owns($user, $article)
-            || $user->hasAnyPermission(['article.review', 'article.publish_any']);
+            || $user->hasAnyPermission(['article.publish_any', 'article.unpublish']);
     }
 
     public function create(User $user): bool
@@ -35,22 +35,10 @@ final class ArticlePolicy
             && $user->hasPermission('article.update_own');
     }
 
-    public function submit(User $user, Article $article): bool
-    {
-        return $this->owns($user, $article)
-            && $article->status->isEditableByOwner()
-            && $user->hasPermission('article.submit');
-    }
-
     public function publishOwn(User $user, Article $article): bool
     {
         return $this->owns($user, $article)
             && $user->hasPermission('article.publish_own');
-    }
-
-    public function review(User $user): bool
-    {
-        return $user->hasPermission('article.review');
     }
 
     public function publishAny(User $user): bool
@@ -70,7 +58,7 @@ final class ArticlePolicy
 
     public function uploadAttachment(User $user, Article $article): bool
     {
-        if ($user->hasAnyPermission(['article.review', 'article.publish_any'])) {
+        if ($user->hasAnyPermission(['article.publish_any', 'article.unpublish'])) {
             return true;
         }
 

@@ -22,12 +22,10 @@ final class RolePermissionSeeder extends Seeder
             'participant.comment' => 'Comment on published articles',
             'participant.view_results' => 'View live voting results',
             'article.create' => 'Create article drafts',
-            'article.submit' => 'Submit own articles for review',
             'article.update_own' => 'Update own articles within the workflow',
-            'article.publish_own' => 'Directly publish own articles (grant required)',
-            'article.review' => 'Review submitted articles',
+            'article.publish_own' => 'Directly publish own articles',
             'article.publish_any' => 'Publish any article',
-            'article.unpublish' => 'Unpublish articles',
+            'article.unpublish' => 'Unpublish / remove any published article',
             'article.feature' => 'Feature articles',
             'comment.moderate' => 'Moderate and remove comments',
             'content.manage' => 'Manage public CMS content',
@@ -68,13 +66,10 @@ final class RolePermissionSeeder extends Seeder
                 ],
                 'publisher' => [
                     'article.create',
-                    'article.submit',
                     'article.update_own',
+                    'article.publish_own',
                     'analytics.view_own',
                 ],
-                // article.publish_own is intentionally absent from the
-                // publisher role: it is only effective while an active
-                // publisher grant sets can_publish_directly.
                 'administrator' => array_keys($permissions),
             ];
 

@@ -80,20 +80,6 @@ final class PublisherArticleController
         ));
     }
 
-    public function submit(Request $request, Article $article): JsonResponse
-    {
-        /** @var User $actor */
-        $actor = $request->user();
-
-        Gate::forUser($actor)->authorize('submit', $article);
-
-        $article = $this->workflow->transition($article, ArticleStatus::PendingReview, $actor);
-
-        return ApiResponse::data(new ArticleDetailResource(
-            $article->loadMissing(['category', 'author', 'attachments']),
-        ));
-    }
-
     public function publish(Request $request, Article $article): JsonResponse
     {
         /** @var User $actor */

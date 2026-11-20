@@ -32,9 +32,19 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { activity, articleStatusLabels, participants, type Article, type ArticleStatus } from "../data";
+import { activity, articleStatusLabels, type Article, type ArticleStatus } from "../data";
 import { useApp, type EditorialResult } from "../store";
 import { ApiError, ApiUnavailableError } from "../services/apiClient";
+import {
+  getAdminUsers,
+  getStaffInvitations,
+  grantPublisherPermission,
+  inviteStaffMember,
+  revokePublisherPermission,
+  updateAdminUser,
+  type AdminUserDto,
+  type StaffInvitationDto,
+} from "../services/userService";
 import {
   activateAdminVotingPeriod,
   createAdminVotingPeriod,
@@ -225,10 +235,10 @@ export function AdminOverview() {
                 marginBottom: "0.25rem",
               }}
             >
-              Pending Review
+              Unpublished / Removed
             </span>
             <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
-              {analytics.articles_summary.by_status.pending_review ?? 0}
+              {analytics.articles_summary.by_status.unpublished ?? 0}
             </strong>
           </div>
           <div>
@@ -419,7 +429,7 @@ function PageHead({
 }
 
 export function AdminArticles() {
-  const { categories, loadAdminArticles, approve, reject, publishAny, unpublish, toggleFeatured } =
+  const { categories, loadAdminArticles, publishAny, unpublish, toggleFeatured } =
     useApp();
   const [rows, setRows] = useState<Article[]>([]);
   const [search, setSearch] = useState("");
@@ -428,8 +438,6 @@ export function AdminArticles() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [rejecting, setRejecting] = useState<Article | null>(null);
-  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const location = useLocation();
 
@@ -549,7 +557,7 @@ export function AdminArticles() {
           <span>Actions</span>
         </div>
         {loading ? (
-          <p className="empty-state-copy">Loading the editorial queue…</p>
+          <p className="empty-state-copy">Loading articles…</p>
         ) : visible.length === 0 ? (
           <p className="empty-state-copy">No articles match these filters.</p>
         ) : (
@@ -567,30 +575,7 @@ export function AdminArticles() {
               <strong>{a.votes}</strong>
               <span className={`status ${a.status}`}>{articleStatusLabels[a.status]}</span>
               <div className="row-actions">
-                {a.status === "pending_review" && (
-                  <>
-                    <button
-                      aria-label="Approve"
-                      title="Approve"
-                      disabled={busy === a.id}
-                      onClick={() => act(a.id, () => approve(a.id), "Article approved.")}
-                    >
-                      <Check />
-                    </button>
-                    <button
-                      aria-label="Reject"
-                      title="Reject"
-                      disabled={busy === a.id}
-                      onClick={() => {
-                        setRejecting(a);
-                        setReason("");
-                      }}
-                    >
-                      <X />
-                    </button>
-                  </>
-                )}
-                {(a.status === "approved" || a.status === "draft" || a.status === "unpublished") && (
+                {(a.status === "draft" || a.status === "unpublished") && (
                   <button
                     aria-label="Publish"
                     title="Publish"
@@ -602,8 +587,8 @@ export function AdminArticles() {
                 )}
                 {a.status === "published" && (
                   <button
-                    aria-label="Unpublish"
-                    title="Unpublish"
+                    aria-label="Unpublish / Remove"
+                    title="Unpublish / Remove"
                     disabled={busy === a.id}
                     onClick={() => act(a.id, () => unpublish(a.id), "Article unpublished.")}
                   >
@@ -632,42 +617,6 @@ export function AdminArticles() {
           ))
         )}
       </div>
-      {rejecting && (
-        <div className="modal-backdrop">
-          <div className="confirm-modal">
-            <button className="modal-close" onClick={() => setRejecting(null)}>
-              <X />
-            </button>
-            <span className="eyebrow">editorial feedback.</span>
-            <h2>Send “{rejecting.title}” back?</h2>
-            <p>The publisher sees this reason on the rejected article.</p>
-            <label className="editor-form">
-              <textarea
-                rows={4}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Explain what needs to change before resubmission."
-              />
-            </label>
-            <div>
-              <button className="btn outline" onClick={() => setRejecting(null)}>
-                cancel
-              </button>
-              <button
-                className="btn"
-                disabled={reason.trim().length < 5 || busy === rejecting.id}
-                onClick={async () => {
-                  const target = rejecting;
-                  setRejecting(null);
-                  await act(target.id, () => reject(target.id, reason.trim()), "Article rejected.");
-                }}
-              >
-                reject article
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1343,67 +1292,464 @@ export function Results() {
 }
 
 export function Participants() {
-  const [inactive, setInactive] = useState<string[]>([]);
+  const { user: currentUser, hasPermission } = useApp();
+  const canManagePublishers = hasPermission("publisher.manage");
+  const canInviteStaff = hasPermission("user.manage");
+
+  const [users, setUsers] = useState<AdminUserDto[]>([]);
+  const [invitations, setInvitations] = useState<StaffInvitationDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [lastPage, setLastPage] = useState(1);
+  const [totalUsers, setTotalUsers] = useState(0);
+
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [showInvitations, setShowInvitations] = useState(false);
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"publisher" | "administrator">("publisher");
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const loadUsers = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await getAdminUsers(
+          {
+            q: debouncedSearch,
+            role: roleFilter,
+            is_active: statusFilter,
+            page,
+            per_page: 20,
+          },
+          signal,
+        );
+        if (signal?.aborted) return;
+        setUsers(res.data);
+        setLastPage(res.meta?.last_page ?? 1);
+        setTotalUsers(res.meta?.total ?? res.data.length);
+      } catch (err) {
+        if (signal?.aborted) return;
+        setError(
+          err instanceof ApiUnavailableError
+            ? "The MINERVA API is unreachable."
+            : err instanceof ApiError
+              ? err.message
+              : "Unable to load users.",
+        );
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [debouncedSearch, roleFilter, statusFilter, page],
+  );
+
+  const loadInvitations = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await getStaffInvitations(signal);
+      if (signal?.aborted) return;
+      setInvitations(res.data);
+    } catch {
+      // Non-critical secondary list
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadUsers(controller.signal);
+    void loadInvitations(controller.signal);
+    return () => controller.abort();
+  }, [loadUsers, loadInvitations]);
+
+  const handleToggleActive = async (target: AdminUserDto) => {
+    if (
+      target.is_active &&
+      !window.confirm(`Deactivate "${target.name}" (${target.email})? They will be signed out.`)
+    ) {
+      return;
+    }
+
+    setBusyId(target.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateAdminUser(target.id, { is_active: !target.is_active });
+      setNotice(
+        target.is_active
+          ? `${target.name} has been deactivated.`
+          : `${target.name} has been reactivated.`,
+      );
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update user status.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleGrantPublisher = async (target: AdminUserDto) => {
+    setBusyId(target.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await grantPublisherPermission(target.id);
+      setNotice(`Publisher access granted to ${target.name}.`);
+      await loadUsers();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError(
+          `${err.message} Click "Invite staff" to send ${target.email} a staff onboarding invitation.`,
+        );
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to grant publisher access.");
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRevokePublisher = async (target: AdminUserDto) => {
+    if (!window.confirm(`Revoke publisher access from "${target.name}"?`)) {
+      return;
+    }
+
+    setBusyId(target.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await revokePublisherPermission(target.id);
+      setNotice(`Publisher access revoked from ${target.name}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to revoke publisher access.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleInviteSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setInviting(true);
+    setInviteError(null);
+    try {
+      await inviteStaffMember(inviteEmail.trim(), inviteRole);
+      setInviteOpen(false);
+      setInviteEmail("");
+      setNotice(`Staff invitation sent to ${inviteEmail.trim()} (${inviteRole}).`);
+      await loadInvitations();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setInviteError(err.fieldError("email") || err.fieldError("role") || err.message);
+      } else {
+        setInviteError(err instanceof Error ? err.message : "Unable to send staff invitation.");
+      }
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const pendingInvitations = invitations.filter((inv) => !inv.accepted_at);
+
   return (
     <div className="admin-page">
-      <PageHead eyebrow="community." title="Participant management." />
+      <PageHead
+        eyebrow="community & access."
+        title="User & publisher management."
+        action={
+          canInviteStaff ? (
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setInviteError(null);
+                setInviteOpen(true);
+              }}
+            >
+              <Plus /> invite staff
+            </button>
+          ) : undefined
+        }
+      />
+
+      {notice && (
+        <div className="notice-banner" role="status">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="table-tools">
         <label>
           <Search />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search participants"
+            placeholder="Search by name or email"
           />
         </label>
+        <select
+          value={roleFilter}
+          onChange={(e) => {
+            setRoleFilter(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by role"
+        >
+          <option value="">All roles</option>
+          <option value="participant">Participant</option>
+          <option value="publisher">Publisher</option>
+          <option value="administrator">Administrator</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by status"
+        >
+          <option value="">All statuses</option>
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+        {pendingInvitations.length > 0 && (
+          <button
+            type="button"
+            className="btn outline"
+            onClick={() => setShowInvitations((v) => !v)}
+          >
+            {showInvitations
+              ? "Hide invitations"
+              : `Pending invitations (${pendingInvitations.length})`}
+          </button>
+        )}
       </div>
-      <div className="data-table participant-table">
-        <div className="table-head">
-          <span>Participant</span>
-          <span>Faculty</span>
-          <span>Votes</span>
-          <span>Status</span>
-          <span>Action</span>
-        </div>
-        {participants
-          .filter((p) => p[0].toString().toLowerCase().includes(search.toLowerCase()))
-          .map((p) => (
-            <div className="table-row" key={p[0]}>
-              <div className="participant-name">
-                <span>
-                  {p[0]
-                    .toString()
-                    .split(" ")
-                    .map((n) => n[0])
-                    .slice(0, 2)
-                    .join("")}
-                </span>
-                <div>
-                  <strong>{p[0]}</strong>
-                  <small>{p[1]}</small>
-                </div>
-              </div>
-              <span>{p[2]}</span>
-              <strong>{p[3]}</strong>
-              <span className={`status ${inactive.includes(p[0] as string) ? "closed" : "open"}`}>
-                {inactive.includes(p[0] as string) ? "inactive" : "active"}
-              </span>
-              <button
-                className="text-button"
-                onClick={() =>
-                  setInactive((c) =>
-                    c.includes(p[0] as string)
-                      ? c.filter((n) => n !== p[0])
-                      : [...c, p[0] as string],
-                  )
-                }
-              >
-                {inactive.includes(p[0] as string) ? "Activate" : "Deactivate"}
-              </button>
+
+      {showInvitations && pendingInvitations.length > 0 && (
+        <div
+          className="data-table"
+          style={{ marginBottom: "1.5rem", border: "1px solid rgba(201, 162, 39, 0.3)" }}
+        >
+          <div className="table-head">
+            <span>Invited Email</span>
+            <span>Role</span>
+            <span>Invited By</span>
+            <span>Expires</span>
+          </div>
+          {pendingInvitations.map((inv) => (
+            <div className="table-row" key={inv.id}>
+              <strong>{inv.email}</strong>
+              <span className="status">{inv.role}</span>
+              <span>{inv.invited_by ?? "System"}</span>
+              <span>{inv.expires_at ? formatDateTime(inv.expires_at) : "—"}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      <div className="data-table participant-table">
+        <div className="table-head">
+          <span>User ({totalUsers})</span>
+          <span>Roles</span>
+          <span>Last Login</span>
+          <span>Status</span>
+          <span>Actions</span>
+        </div>
+        {loading ? (
+          <p className="empty-state-copy">Loading users…</p>
+        ) : users.length === 0 ? (
+          <p className="empty-state-copy">No users match these filters.</p>
+        ) : (
+          users.map((u) => {
+            const initials = u.name
+              .split(" ")
+              .map((n) => n[0])
+              .slice(0, 2)
+              .join("")
+              .toUpperCase();
+            const isSelf = currentUser?.id === u.id;
+            const isPublisher = u.roles.includes("publisher");
+            const isAdmin = u.roles.includes("administrator");
+
+            return (
+              <div className="table-row" key={u.id}>
+                <div className="participant-name">
+                  <span>{initials || "U"}</span>
+                  <div>
+                    <strong>{u.name}</strong>
+                    <small>{u.email}</small>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  {u.roles.map((r) => (
+                    <span className="status" key={r}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+                <span>{u.last_login_at ? formatDateTime(u.last_login_at) : "Never"}</span>
+                <span className={`status ${u.is_active ? "open" : "closed"}`}>
+                  {u.is_active ? "active" : "inactive"}
+                </span>
+                <div className="row-actions" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                  {canManagePublishers && !isAdmin && (
+                    isPublisher ? (
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={busyId === u.id}
+                        onClick={() => void handleRevokePublisher(u)}
+                      >
+                        Revoke publisher
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={busyId === u.id}
+                        onClick={() => void handleGrantPublisher(u)}
+                      >
+                        Grant publisher
+                      </button>
+                    )
+                  )}
+                  {!isSelf && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={busyId === u.id}
+                      onClick={() => void handleToggleActive(u)}
+                    >
+                      {u.is_active ? "Deactivate" : "Activate"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
+
+      {lastPage > 1 && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "1rem",
+          }}
+        >
+          <button
+            type="button"
+            className="btn outline"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <small>
+            Page {page} of {lastPage}
+          </small>
+          <button
+            type="button"
+            className="btn outline"
+            disabled={page >= lastPage}
+            onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {inviteOpen && (
+        <div className="modal-backdrop">
+          <div className="confirm-modal">
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setInviteOpen(false)}
+              aria-label="Close"
+            >
+              <X />
+            </button>
+            <span className="eyebrow">staff onboarding.</span>
+            <h2>Invite a staff member</h2>
+            <p>
+              Send an onboarding invitation to grant publisher or administrator access.
+            </p>
+            {inviteError && (
+              <div className="error-banner" role="alert" style={{ marginBottom: "1rem" }}>
+                <span>{inviteError}</span>
+              </div>
+            )}
+            <form className="editor-form" onSubmit={(e) => void handleInviteSubmit(e)}>
+              <label>
+                Email address
+                <input
+                  type="email"
+                  required
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="staff@example.com"
+                  disabled={inviting}
+                />
+              </label>
+              <label>
+                Assigned role
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "publisher" | "administrator")}
+                  disabled={inviting}
+                >
+                  <option value="publisher">Publisher (can create &amp; publish articles)</option>
+                  <option value="administrator">Administrator (full platform governance)</option>
+                </select>
+              </label>
+              <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn outline"
+                  onClick={() => setInviteOpen(false)}
+                  disabled={inviting}
+                >
+                  cancel
+                </button>
+                <button type="submit" className="btn" disabled={inviting}>
+                  {inviting ? "sending…" : "send invitation"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

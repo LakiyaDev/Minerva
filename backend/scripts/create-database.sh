@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 #
-# create-database.sh — create (or reset) the Minerva database.
+# create-database.sh — create the schema and reference data for Minerva.
 #
-#   scripts/create-database.sh                 # create the database + user, migrate, seed
-#   scripts/create-database.sh --fresh         # additionally drop and recreate the schema
-#   scripts/create-database.sh --dry-run       # print the SQL, do not execute
+#   scripts/create-database.sh                    # create database + user, migrate, seed
+#   scripts/create-database.sh --fresh            # additionally drop the schema first
+#   scripts/create-database.sh --dry-run          # print the SQL, execute nothing
 #
 # The target database and application user are read from `backend/.env`
 # (DB_CONNECTION / DB_DATABASE / DB_USERNAME / DB_PASSWORD). The privileged
 # connection used to create them comes from, in order of precedence:
 #
-#   --admin-user / --admin-password / --socket  command-line flags
-#   DB_ADMIN_USER / DB_ADMIN_PASSWORD           environment variables
-#   the `root` account over the unix socket       default, no password
+#   --admin-user / --admin-password / --socket   command-line flags
+#   DB_ADMIN_USER / DB_ADMIN_PASSWORD            environment variables
+#   the `root` account over the configured socket   local default, no password
 #
-# The script never writes credentials to disk and never prints them.
+# Credentials are never written to disk and never echoed unless --dry-run is
+# used, which prints them redacted.
 
 set -euo pipefail
 
@@ -27,7 +28,7 @@ ADMIN_PASSWORD="${DB_ADMIN_PASSWORD:-}"
 SOCKET="${MYSQL_SOCKET:-}"
 
 usage() {
-    sed -n '3,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +70,32 @@ if [[ "$DB_CONNECTION" != "mysql" && "$DB_CONNECTION" != "mariadb" ]]; then
     exit 1
 fi
 
+if [[ "$FRESH" -eq 1 ]]; then
+    echo "!! --fresh will DROP the '${DB_DATABASE}' schema and every table in it." >&2
+    echo "!! Press Ctrl-C within 5 seconds to abort." >&2
+    sleep 5
+fi
+
+# Statements, in order: optional drop, schema, user at each host, then grants.
+STATEMENTS=()
+
+if [[ "$FRESH" -eq 1 ]]; then
+    # Only with --fresh: the schema is dropped so no stale table survives.
+    STATEMENTS+=("DROP DATABASE IF EXISTS \`${DB_DATABASE}\`;")
+fi
+
+STATEMENTS+=("CREATE DATABASE IF NOT EXISTS \`${DB_DATABASE}\`
+    CHARACTER SET ${DB_CHARSET} COLLATE ${DB_COLLATION};")
+
+for host in localhost 127.0.0.1; do
+    STATEMENTS+=("CREATE USER IF NOT EXISTS '${DB_USERNAME}'@'${host}' IDENTIFIED BY '${DB_PASSWORD}';")
+    STATEMENTS+=("ALTER USER '${DB_USERNAME}'@'${host}' IDENTIFIED BY '${DB_PASSWORD}';")
+done
+
+STATEMENTS+=("GRANT ALL PRIVILEGES ON \`${DB_DATABASE}\`.* TO '${DB_USERNAME}'@'localhost';")
+STATEMENTS+=("GRANT ALL PRIVILEGES ON \`${DB_DATABASE}\`.* TO '${DB_USERNAME}'@'127.0.0.1';")
+printf -v SQL '%s\n' "${STATEMENTS[@]}" 2>/dev/null || SQL="$(printf '%s\n' "${STATEMENTS[@]}")"
+
 CLIENT=""
 for candidate in mariadb mysql; do
     if command -v "$candidate" >/dev/null 2>&1; then
@@ -80,37 +107,6 @@ done
 if [[ -z "$CLIENT" && "$DRY_RUN" -eq 0 ]]; then
     echo "Neither 'mariadb' nor 'mysql' was found on PATH. Install mariadb-clients or mysql-clients." >&2
     exit 1
-fi
-
-# The application user is reached over TCP, so grant it at every host it may
-# come from: loopback by name and by IP, plus localhost over the socket.
-HOSTS=("localhost" "127.0.0.1")
-
-SQL="$(cat <<SQL
-CREATE DATABASE IF NOT EXISTS \`${DB_DATABASE}\`
-    CHARACTER SET ${DB_CHARSET} COLLATE ${DB_COLLATION};
-
-CREATE USER IF NOT EXISTS '${DB_USERNAME}'@'localhost' IDENTIFIED BY '${ADMIN_PASSWORD_PLACEHOLDER}';
-SQL
-)"
-
-# Placeholders are substituted without ever being echoed back.
-SQL="${SQL//\'${ADMIN_PASSWORD_PLACEHOLDER}\'/\'${DB_PASSWORD}\'}"
-
-for host in "${HOSTS[@]}"; do
-    SQL+="
-CREATE USER IF NOT EXISTS '${DB_USERNAME}'@'${host}' IDENTIFIED BY '${DB_PASSWORD}';
-ALTER USER '${DB_USERNAME}'@'${host}' IDENTIFIED BY '${DB_PASSWORD}';
-GRANT ALL PRIVILEGES ON \`${DB_DATABASE}\`.* TO '${DB_USERNAME}'@'${host}';
-FLUSH PRIVILEGES;"
-done
-
-if [[ "$FRESH" -eq 1 ]]; then
-    echo "!! --fresh will DROP the '${DB_DATABASE}' schema and every table in it." >&2
-    echo "!! Press Ctrl-C within 5 seconds to abort." >&2
-    sleep 5
-    SQL="DROP DATABASE IF EXISTS \`${DB_DATABASE}\`;
-${SQL}"
 fi
 
 ADMIN_ARGS=(--host="$DB_HOST" --port="$DB_PORT" --user="$ADMIN_USER")

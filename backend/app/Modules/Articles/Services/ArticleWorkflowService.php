@@ -29,10 +29,7 @@ final class ArticleWorkflowService
      * editing an existing draft.
      */
     private const TRANSITIONS = [
-        'draft' => ['draft', 'pending_review', 'published'],
-        'pending_review' => ['approved', 'rejected'],
-        'approved' => ['published'],
-        'rejected' => ['draft', 'pending_review'],
+        'draft' => ['draft', 'published'],
         'published' => ['unpublished'],
         'unpublished' => ['published'],
     ];

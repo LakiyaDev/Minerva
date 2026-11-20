@@ -40,24 +40,16 @@ Route::prefix('publisher/articles')->middleware(['auth:sanctum', 'active'])->gro
     Route::get('/{article}', [PublisherArticleController::class, 'show']);
     Route::patch('/{article}', [PublisherArticleController::class, 'update'])
         ->middleware('permission:article.update_own');
-    Route::post('/{article}/submit', [PublisherArticleController::class, 'submit'])
-        ->middleware('permission:article.submit');
     Route::post('/{article}/publish', [PublisherArticleController::class, 'publish'])
         ->middleware('permission:article.publish_own');
     Route::post('/{article}/attachments', [PublisherArticleAttachmentController::class, 'store']);
     Route::delete('/{article}/attachments/{attachment}', [PublisherArticleAttachmentController::class, 'destroy']);
 });
 
-// Editor-in-chief / moderation orchestration.
+// Administrator article oversight (remove/unpublish, republish, feature).
 Route::prefix('admin/articles')->middleware(['auth:sanctum', 'active', 'staff.mfa'])->group(function (): void {
     Route::get('/', [AdminArticleController::class, 'index'])
-        ->middleware('permission:article.review,article.publish_any');
-    Route::get('/review-queue', [AdminArticleController::class, 'reviewQueue'])
-        ->middleware('permission:article.review');
-    Route::post('/{article}/approve', [AdminArticleController::class, 'approve'])
-        ->middleware('permission:article.review');
-    Route::post('/{article}/reject', [AdminArticleController::class, 'reject'])
-        ->middleware('permission:article.review');
+        ->middleware('permission:article.unpublish,article.publish_any');
     Route::post('/{article}/publish', [AdminArticleController::class, 'publish'])
         ->middleware('permission:article.publish_any');
     Route::post('/{article}/unpublish', [AdminArticleController::class, 'unpublish'])

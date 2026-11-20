@@ -5,7 +5,6 @@ declare(strict_types=1);
 use App\Modules\Articles\Database\Seeders\ArticleCategorySeeder;
 use App\Modules\Articles\Enums\ArticleStatus;
 use App\Modules\Articles\Models\Article;
-use App\Modules\Articles\Models\ArticleStatusHistory;
 use App\Modules\Identity\Models\User;
 use Laravel\Sanctum\Sanctum;
 
@@ -28,20 +27,6 @@ function actingAsAdmin(): User
     return $admin;
 }
 
-it('shows the review queue to an administrator', function (): void {
-    actingAsAdmin();
-
-    $pending = Article::factory()->withStatus(ArticleStatus::PendingReview)->create();
-    Article::factory()->withStatus(ArticleStatus::Draft)->create();
-    Article::factory()->withStatus(ArticleStatus::Published)->create();
-
-    $this->getJson('/api/v1/admin/articles/review-queue')
-        ->assertOk()
-        ->assertJsonCount(1, 'data')
-        ->assertJsonPath('data.0.id', $pending->getKey())
-        ->assertJsonPath('data.0.status', 'pending_review');
-});
-
 it('lists every status for administrators with filters', function (): void {
     actingAsAdmin();
 
@@ -58,52 +43,10 @@ it('lists every status for administrators with filters', function (): void {
         ->assertJsonCount(1, 'data');
 });
 
-it('approves a pending article', function (): void {
-    actingAsAdmin();
-
-    $article = Article::factory()->withStatus(ArticleStatus::PendingReview)->create();
-
-    $this->postJson('/api/v1/admin/articles/'.$article->getKey().'/approve')
-        ->assertOk()
-        ->assertJsonPath('data.status', 'approved');
-
-    expect($article->fresh()->status)->toBe(ArticleStatus::Approved);
-});
-
-it('rejects a pending article and stores the reason in the history', function (): void {
-    actingAsAdmin();
-
-    $article = Article::factory()->withStatus(ArticleStatus::PendingReview)->create();
-
-    $this->postJson('/api/v1/admin/articles/'.$article->getKey().'/reject', [
-        'reason' => 'The methodology section needs supporting citations.',
-    ])
-        ->assertOk()
-        ->assertJsonPath('data.status', 'rejected');
-
-    $history = ArticleStatusHistory::query()
-        ->where('article_id', $article->getKey())
-        ->where('to_status', ArticleStatus::Rejected->value)
-        ->firstOrFail();
-
-    expect($history->reason)->toBe('The methodology section needs supporting citations.')
-        ->and($history->from_status)->toBe(ArticleStatus::PendingReview->value);
-});
-
-it('requires a rejection reason', function (): void {
-    actingAsAdmin();
-
-    $article = Article::factory()->withStatus(ArticleStatus::PendingReview)->create();
-
-    $this->postJson('/api/v1/admin/articles/'.$article->getKey().'/reject', [
-        'reason' => 'no',
-    ])->assertStatus(422)->assertJsonValidationErrors(['reason']);
-});
-
 it('publishes and unpublishes an article', function (): void {
     actingAsAdmin();
 
-    $article = Article::factory()->withStatus(ArticleStatus::Approved)->create();
+    $article = Article::factory()->withStatus(ArticleStatus::Draft)->create();
 
     $this->postJson('/api/v1/admin/articles/'.$article->getKey().'/publish')
         ->assertOk()
@@ -152,7 +95,7 @@ it('blocks publishers from the editorial routes', function (): void {
 
     Sanctum::actingAs($publisher->fresh());
 
-    $this->getJson('/api/v1/admin/articles/review-queue')->assertForbidden();
+    $this->getJson('/api/v1/admin/articles')->assertForbidden();
 });
 
 it('blocks participants from the editorial routes', function (): void {
@@ -160,7 +103,7 @@ it('blocks participants from the editorial routes', function (): void {
 
     Sanctum::actingAs($participant);
 
-    $this->getJson('/api/v1/admin/articles/review-queue')->assertForbidden();
+    $this->getJson('/api/v1/admin/articles')->assertForbidden();
 });
 
 it('requires MFA enrolment before editorial routes are reachable', function (): void {
@@ -168,7 +111,7 @@ it('requires MFA enrolment before editorial routes are reachable', function (): 
 
     Sanctum::actingAs($admin);
 
-    $this->getJson('/api/v1/admin/articles/review-queue')
+    $this->getJson('/api/v1/admin/articles')
         ->assertForbidden()
         ->assertJsonPath('code', 'mfa_enrollment_required');
 });

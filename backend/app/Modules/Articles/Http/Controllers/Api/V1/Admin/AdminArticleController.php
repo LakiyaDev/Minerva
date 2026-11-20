@@ -6,7 +6,6 @@ namespace App\Modules\Articles\Http\Controllers\Api\V1\Admin;
 
 use App\Modules\Articles\Enums\ArticleStatus;
 use App\Modules\Articles\Http\Requests\FeatureArticleRequest;
-use App\Modules\Articles\Http\Requests\RejectArticleRequest;
 use App\Modules\Articles\Http\Resources\ArticleDetailResource;
 use App\Modules\Articles\Http\Resources\ArticleListResource;
 use App\Modules\Articles\Models\Article;
@@ -33,38 +32,6 @@ final class AdminArticleController
             ->paginate($perPage);
 
         return ApiResponse::data(ArticleListResource::collection($articles));
-    }
-
-    public function reviewQueue(Request $request): JsonResponse
-    {
-        $perPage = min(100, max(1, $request->integer('per_page', 20)));
-
-        $articles = Article::query()
-            ->where('status', ArticleStatus::PendingReview)
-            ->with(['category:id,name,slug', 'author:id,name'])
-            ->orderBy('created_at')
-            ->paginate($perPage);
-
-        return ApiResponse::data(ArticleListResource::collection($articles));
-    }
-
-    public function approve(Request $request, Article $article): JsonResponse
-    {
-        $article = $this->workflow->transition($article, ArticleStatus::Approved, $request->user());
-
-        return $this->detail($article);
-    }
-
-    public function reject(RejectArticleRequest $request, Article $article): JsonResponse
-    {
-        $article = $this->workflow->transition(
-            $article,
-            ArticleStatus::Rejected,
-            $request->user(),
-            (string) $request->validated()['reason'],
-        );
-
-        return $this->detail($article);
     }
 
     public function publish(Request $request, Article $article): JsonResponse

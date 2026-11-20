@@ -1,10 +1,4 @@
-export type ArticleStatus =
-  | "draft"
-  | "pending_review"
-  | "approved"
-  | "rejected"
-  | "published"
-  | "unpublished";
+export type ArticleStatus = "draft" | "published" | "unpublished";
 
 export type ArticleCategory = {
   id: string;
@@ -61,9 +55,6 @@ export type Article = {
  */
 export const articleStatusLabels: Record<ArticleStatus, string> = {
   draft: "Draft",
-  pending_review: "Pending Review",
-  approved: "Approved",
-  rejected: "Rejected",
   published: "Published",
   unpublished: "Unpublished",
 };
