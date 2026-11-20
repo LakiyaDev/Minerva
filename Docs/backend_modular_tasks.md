@@ -22,9 +22,11 @@ React + TypeScript client
 Laravel REST API ───── Laravel Reverb (authenticated WebSocket events)
         │
         ├── MySQL: application data, permissions, votes, audit logs
-        ├── AWS S3: article images, attachments, E-Magazine files
+        ├── AWS S3: article images and attachments
         └── Queue worker: notifications, media processing, audit/analytics jobs
 ```
+
+> **Architecture Decision — Static Informational Content:** Workshops, timeline events, sponsors, organizing committee details, and magazine/E-Magazine pages are hardcoded directly in the React frontend. No backend Content Management (CMS) module, tables, or API endpoints are needed.
 
 ### Modular-monolith architecture
 
@@ -36,14 +38,12 @@ Modules communicate through application services, domain events, and explicit co
 Laravel application (single deployable)
 │
 ├── Identity & Access      ─── users, roles, permissions, sessions
-├── Content Management     ─── workshops, timeline, sponsors, committee, magazine
-├── Articles & Editorial   ─── articles, categories, attachments, review workflow
+├── Articles & Editorial   ─── articles, categories, media & attachments, review workflow
 ├── Voting                 ─── voting periods, votes, result broadcasts
 ├── Comments & Moderation  ─── comments, moderation records
 ├── Analytics              ─── publisher and platform read models
 ├── Administration         ─── management orchestration and platform settings
 ├── Integrations           ─── service API keys and external-facing integrations
-├── Media                  ─── S3 uploads, file validation, signed delivery
 └── Audit                  ─── append-only accountability records
 ```
 
@@ -56,14 +56,12 @@ app/
   Modules/
     Identity/
       Actions/  Contracts/  Events/  Http/  Models/  Policies/  Services/
-    Content/
     Articles/
     Voting/
     Comments/
     Analytics/
     Administration/
     Integrations/
-    Media/
     Audit/
   Shared/
     Http/  Support/  ValueObjects/  Exceptions/
@@ -83,14 +81,12 @@ For a larger codebase, modules may instead be local Composer packages under `mod
 | Module | Owns | Responsibilities | Events / contracts |
 |---|---|---|---|
 | Identity & Access | Users, roles/permissions, publisher grants | Registration, login, profile, authorization, publisher grants | `UserRegistered`, `PublisherPermissionChanged` |
-| Content Management | Workshops, timeline, sponsors, committee, magazines | Public content and CMS workflows | Published-content query contract |
-| Articles & Editorial | Articles, categories, attachments, status history | Drafting, review, approval, publishing, ownership | `ArticlePublished`, `ArticleUnpublished`, `ArticleStatusChanged` |
+| Articles & Editorial | Articles, categories, media attachments, status history | Drafting, review, approval, publishing, attachment uploads, validation, storage & delivery, ownership | `ArticlePublished`, `ArticleUnpublished`, `ArticleStatusChanged` |
 | Voting | Voting periods, votes, vote summaries | Eligibility, final votes, result calculations | `VoteRecorded`, `VotingResultsUpdated` |
 | Comments & Moderation | Comments, moderation records | Comment lifecycle and moderation | `CommentSubmitted`, `CommentRemoved` |
 | Analytics | Read models/caches only | Owner and platform reporting | Consumes domain events; exposes report queries |
 | Administration | Settings and admin orchestration | Dashboard aggregation and coordinated management actions | Calls module service contracts only |
 | Integrations | API keys/integration metadata | Scoped service key lifecycle and integration APIs | `ApiKeyCreated`, `ApiKeyRevoked`, `ApiKeyUsed` |
-| Media | Storage metadata if separated | Secure upload, validation, signed delivery | Upload/download service contract |
 | Audit | Audit logs | Immutable accountability records | Consumes auditable events |
 
 ### 3.3 Module dependency rules
@@ -108,13 +104,11 @@ For a larger codebase, modules may instead be local Composer packages under `mod
 | Module | Route families |
 |---|---|
 | Identity & Access | `/auth/*`, `/me`, `/admin/users/*` |
-| Content Management | `/public/*`, `/workshops`, `/timeline-events`, `/sponsors`, `/committee-members`, `/magazines`, CMS `/admin/*` routes |
-| Articles & Editorial | `/articles`, `/publisher/articles/*`, `/admin/articles/*` |
+| Articles & Editorial | `/articles`, `/article-categories`, `/publisher/articles/*`, `/admin/articles/*`, `/articles/{article}/attachments/*` |
 | Voting | `/voting/*`, `/articles/{article}/votes`, `/articles/{article}/vote-results`, `/me/votes` |
 | Comments & Moderation | `/articles/{article}/comments`, `/me/comments`, `/admin/comments/*` |
 | Analytics | `/publisher/articles/{article}/analytics`, `/admin/analytics` |
 | Integrations | `/admin/api-keys/*`, `/integrations/*` |
-| Media | Attachment upload/remove and signed-delivery actions |
 | Audit | `/admin/audit-logs` |
 
 ### 3.5 Cross-module workflow examples
@@ -128,7 +122,7 @@ For a larger codebase, modules may instead be local Composer packages under `mod
 ### 4.1 Versioning and URLs
 
 - Base URL: `https://api.<approved-domain>/api/v1`
-- Use plural resource nouns: `/articles`, `/workshops`, `/comments`.
+- Use plural resource nouns: `/articles`, `/votes`, `/comments`.
 - Use JSON request and response bodies with `Content-Type: application/json`.
 - Paginated list endpoints accept `page` and `per_page`; cap `per_page` at 100.
 - Filtering/sorting must use an allow-list; never pass client field names directly into SQL.
@@ -169,7 +163,7 @@ Core permissions:
 - `article.create`, `article.submit`, `article.update_own`, `article.publish_own`
 - `article.review`, `article.publish_any`, `article.unpublish`, `article.feature`
 - `comment.moderate`
-- `content.manage`, `user.manage`, `publisher.manage`
+- `user.manage`, `publisher.manage` (`content.manage` is reserved/unused because static informational site content is hardcoded in the frontend)
 - `analytics.view_own`, `analytics.view_all`, `settings.manage`, `audit.view`
 
 Laravel policies must verify the authenticated subject, requested resource, ownership, status, and required permission on every protected action.
@@ -233,20 +227,15 @@ Voting transaction:
 
 Never implement duplicate-vote prevention only with a pre-query. The unique constraint and transaction are mandatory safeguards against concurrent requests.
 
-### 5.5 Comment, content, analytics, and audit tables
+### 5.5 Comment, analytics, and audit tables
 
 | Table | Key fields | Rules / indexes |
 |---|---|---|
 | `comments` | `id`, `article_id`, `user_id`, `body`, `status`, `removed_at`, `removed_by` | FK to article/user; index `(article_id, created_at)`; only published articles are commentable. |
 | `comment_moderation_records` | `id`, `comment_id`, `action`, `reason`, `acted_by`, `created_at` | Append-only accountability record. |
-| `workshops` | `id`, `title`, `description`, `starts_at`, `speaker_details`, `status` | Index start date/status. |
-| `workshop_resources` | `id`, `workshop_id`, `title`, `url_or_storage_key`, `sort_order` | FK to workshop. |
-| `timeline_events` | `id`, `title`, `description`, `starts_at`, `ends_at`, `sort_order`, `status` | Index dates/status. |
-| `sponsors` | `id`, `name`, `logo_storage_key`, `website_url`, `sort_order`, `status` | Validate safe URL. |
-| `committee_members` | `id`, `name`, `position`, `team`, `photo_storage_key`, `sort_order`, `status` | Public visibility is explicit. |
-| `magazine_publications` | `id`, `title`, `description`, `cover_storage_key`, `published_at`, `status` | Index published status/date. |
-| `e_magazine_files` | `id`, `magazine_publication_id`, `storage_key`, `mime_type`, `size_bytes` | Validate file type and access policy. |
 | `audit_logs` | `id`, `actor_id`, `action`, `subject_type`, `subject_id`, `metadata`, `ip_hash`, `created_at` | Append-only; index `(subject_type, subject_id)` and `(actor_id, created_at)`. |
+
+*(Workshops, timeline events, sponsors, organizing committee, and magazine/E-Magazine datasets are hardcoded in the frontend and have no backend database tables.)*
 
 Publisher analytics should be derived from articles, votes, and comments, or maintained through read models. Every own-analytics query must include `articles.author_id = authenticated_user_id`, unless the caller has platform-wide analytics permission.
 
@@ -281,19 +270,13 @@ All endpoint paths below are relative to `/api/v1`. “Auth” means a valid use
 
 ### 6.2 Public content
 
+> **Note:** Workshops, timeline, sponsors, organizing committee, and magazine pages are hardcoded in the frontend with no backend CMS endpoints required. Public backend routes serve published articles and categories only.
+
 | Method | Endpoint | Auth | Purpose |
 |---|---|---|---|
-| GET | `/public/home` | Public | Aggregated homepage content. |
-| GET | `/public/initiative` | Public | Initiative information. |
-| GET | `/workshops` | Public | Published workshop list. |
-| GET | `/workshops/{workshop}` | Public | Published workshop details/resources. |
-| GET | `/timeline-events` | Public | Published timeline. |
-| GET | `/sponsors` | Public | Published sponsors. |
-| GET | `/committee-members` | Public | Published committee details. |
-| GET | `/magazines` | Public | Published magazine list. |
-| GET | `/magazines/{magazine}` | Public | Magazine and E-Magazine metadata. |
 | GET | `/articles` | Public | Published articles; supports safe filters/pagination. |
 | GET | `/articles/{article:slug}` | Public | Published article detail. |
+| GET | `/article-categories` | Public | Editorial categories with published article counts. |
 
 ### 6.3 Articles and publisher dashboard
 
@@ -334,7 +317,6 @@ All endpoint paths below are relative to `/api/v1`. “Auth” means a valid use
 | POST | `/admin/articles/{article}/publish` | `article.publish_any` | Publish article. |
 | POST | `/admin/articles/{article}/unpublish` | `article.unpublish` | Remove public visibility. |
 | POST | `/admin/articles/{article}/feature` | `article.feature` | Mark/unmark featured. |
-| GET/POST/PATCH/DELETE | `/admin/workshops`, `/admin/timeline-events`, `/admin/sponsors`, `/admin/committee-members`, `/admin/magazines` | `content.manage` | Manage public content. |
 | GET/PATCH | `/admin/voting-periods` and `/admin/voting-periods/{period}` | `settings.manage` | Configure voting window. |
 | GET | `/admin/comments` | `comment.moderate` | Moderation queue. |
 | POST | `/admin/comments/{comment}/remove` | `comment.moderate` | Remove comment and record action/reason. |
@@ -500,12 +482,11 @@ Security schemes to document:
 
 1. Establish the Laravel modular-monolith skeleton, module route loading, shared primitives, migration convention, base errors, and OpenAPI skeleton.
 2. Implement the Identity & Access module: users, roles/permissions, authentication, `/me`, policies, and publisher grants.
-3. Implement the Content Management and Media modules for public CMS data, secure files, and read endpoints.
-4. Implement Articles & Editorial, including the state machine, attachments, publication events, and publisher endpoints.
-5. Implement Voting, including transaction-safe vote creation, results, and Reverb broadcasts.
-6. Implement Comments & Moderation and Audit event listeners.
-7. Implement Analytics read models and Administration orchestration with ownership protections.
-8. Implement Integrations, API-key lifecycle, security hardening, queues, backups/monitoring, OpenAPI completion, and full module test suites.
+3. Implement Articles & Editorial, including the state machine, media attachments (upload, validation, storage disk abstraction, and delivery), publication events, and publisher endpoints *(static site CMS content lives in the frontend)*.
+4. Implement Voting, including transaction-safe vote creation, results, and Reverb broadcasts.
+5. Implement Comments & Moderation and Audit event listeners.
+6. Implement Analytics read models and Administration orchestration with ownership protections.
+7. Implement Integrations, API-key lifecycle, security hardening, queues, backups/monitoring, OpenAPI completion, and full module test suites.
 
 ## 12. Backend Definition of Done
 

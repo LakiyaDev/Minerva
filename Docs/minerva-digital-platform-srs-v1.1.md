@@ -12,7 +12,7 @@
 
 The Minerva Digital Platform is a centralized web platform for managing and presenting the Minerva Scientific Communication Initiative organized by IEEE EMBS Student Branch Chapter, University of Sri Jayewardenepura.
 
-The platform will combine a public-facing website with an interactive article competition system and an administrative content management system.
+The platform combines a static informational public website (managed directly in the frontend) with a dynamic backend-driven interactive article competition, voting, commenting, and analytics system.
 
 The initiative includes:
 
@@ -21,7 +21,7 @@ The initiative includes:
 3. Minerva Magazine launch and awarding ceremony.
 4. Minerva E-Magazine publication.
 
-The platform will provide information about the initiative, publish competition articles, facilitate registered-participant voting and commenting, and support administrative management of all platform content.
+The platform provides information about the initiative (hardcoded statically in the frontend), publishes competition articles, facilitates registered-participant voting and commenting, and supports administrative management of editorial articles, voting, moderation, users, and analytics.
 
 ## 2. Objectives
 
@@ -112,18 +112,17 @@ An administrator has platform-wide management authority.
 - Grant and revoke publisher permissions.
 - Configure publishing permissions, including direct-publishing access.
 - Create, edit, approve, reject, publish, unpublish and feature articles.
-- Manage workshops, event timelines, sponsors and organizing committee information.
-- Manage magazine and E-Magazine content.
 - View platform-wide voting and article analytics.
 - Monitor and moderate comments.
 - Remove inappropriate comments.
 - Manage voting periods and competition settings.
-- Manage platform content and configuration.
 - Review relevant platform activity and audit logs.
+
+> **Scope note:** Workshops, event timelines, sponsors, organizing committee details, and magazine/E-Magazine informational pages are statically maintained in the frontend codebase; no administrative backend CMS module is required.
 
 ## 4. Functional Requirements
 
-### 4.1 Public Website and Content Management
+### 4.1 Public Website Content (Frontend-Managed)
 
 **FR-01:** The system shall provide a public homepage introducing the Minerva initiative.
 
@@ -143,7 +142,7 @@ An administrator has platform-wide management authority.
 
 **FR-09:** The system shall provide access to the published E-Magazine.
 
-**FR-10:** Administrators shall be able to manage public website content through the administrator dashboard without directly modifying source code.
+**FR-10:** *(Updated — Frontend-Managed)* Public informational website content (`FR-01`–`FR-09`: initiative intro, workshops, competition rules, timeline, sponsors, organizing committee, and magazine/E-Magazine content) shall be maintained statically/hardcoded in the frontend codebase; no backend CMS module, CMS database tables, or administrative CMS API endpoints are required.
 
 ### 4.2 User Registration and Authentication
 
@@ -260,7 +259,7 @@ An administrator has platform-wide management authority.
 
 **FR-56:** The system shall provide a publisher dashboard containing article creation, submission, publication status and own-article analytics.
 
-**FR-57:** The system shall provide an administrator dashboard containing user management, content management, article management, voting statistics and comment moderation.
+**FR-57:** The system shall provide an administrator dashboard containing user management, article management, voting statistics, voting period controls, and comment moderation.
 
 ## 5. Role and Permission Matrix
 
@@ -281,8 +280,7 @@ An administrator has platform-wide management authority.
 | View own article analytics | No | No | Yes | Yes |
 | View other publishers' private analytics | No | No | No | Yes |
 | Grant publisher permissions | No | No | No | Yes |
-| Manage workshops and sponsors | No | No | No | Yes |
-| Manage magazine content | No | No | No | Yes |
+| Manage workshops, sponsors, and magazine | Frontend static | Frontend static | Frontend static | Frontend static (no backend CMS) |
 | Manage users and platform settings | No | No | No | Yes |
 
 **Permission note:** Publisher status does not automatically grant voting or commenting rights. These functions require the user to be authenticated as a registered participant. Administrators may also participate as voters or commenters only if their accounts have participant eligibility and the competition rules permit it.
@@ -456,18 +454,14 @@ The database shall support the following main entities:
 - Articles
 - Article categories
 - Article attachments
-- Votes
+- Article status history
+- Voting periods & votes
 - Comments
 - Comment moderation records
-- Workshops
-- Workshop resources
-- Events and timeline entries
-- Sponsors
-- Organizing committee members
-- Magazine publications
-- E-Magazine files
 - Article analytics or engagement records
 - Audit logs
+
+> **Note:** Workshops, workshop resources, timeline entries, sponsors, organizing committee members, and magazine/E-Magazine pages are statically maintained in the frontend and do not require backend database entities.
 
 ### Critical Database Constraints
 
@@ -488,15 +482,14 @@ The REST API shall provide endpoint groups for:
 - Authentication and registration.
 - User profiles and role management.
 - Publisher permission management.
-- Public website content.
-- Workshops and events.
-- Sponsors and organizing committee.
 - Articles and article attachments.
 - Editorial approval and publishing.
 - Voting and voting results.
 - Comments and comment moderation.
 - Publisher analytics.
 - Administrator analytics and platform settings.
+
+*(Static informational pages—initiative overview, workshops, timeline, sponsors, organizing committee, and magazine—are hardcoded in the frontend with no backend CMS API required.)*
 
 All protected endpoints shall validate authentication and authorization on the backend.
 
@@ -516,7 +509,7 @@ The platform shall be considered functionally complete when:
 10. Administrators can moderate comments.
 11. Authorized publishers can view analytics for their own articles.
 12. Publishers cannot access another publisher's private analytics.
-13. Administrators can manage all platform content and view platform-wide analytics.
+13. Administrators can manage editorial articles, voting windows, moderation, users, and view platform-wide analytics.
 14. Security, functionality, usability and performance testing have been completed successfully.
 
 ---

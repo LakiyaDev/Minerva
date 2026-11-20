@@ -9,6 +9,7 @@ use App\Modules\Identity\Models\Concerns\HasRolesAndPermissions;
 use App\Modules\Identity\Notifications\StaffPasswordResetNotification;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -25,6 +26,9 @@ class User extends Authenticatable
         'email',
         'password',
         'email_verified_at',
+        'university_id',
+        'faculty',
+        'phone',
         'is_active',
     ];
 
@@ -47,6 +51,11 @@ class User extends Authenticatable
             'two_factor_recovery_codes' => 'encrypted:array',
             'two_factor_confirmed_at' => 'datetime',
         ];
+    }
+
+    public function university(): BelongsTo
+    {
+        return $this->belongsTo(University::class);
     }
 
     public function oauthAccounts(): HasMany

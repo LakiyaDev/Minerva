@@ -14,10 +14,15 @@ export function ArticleCard({
 }) {
   const { role, voted, requestVote } = useApp();
   const hasVoted = voted.includes(article.id);
+  const href = `/articles/${article.slug || article.id}`;
   return (
     <article className={`article-card ${compact ? "compact" : ""}`}>
-      <Link to={`/articles/${article.id}`} className="article-image">
-        <img src={article.image} alt="" loading="lazy" />
+      <Link to={href} className="article-image">
+        {article.image ? (
+          <img src={article.image} alt="" loading="lazy" />
+        ) : (
+          <span className="article-placeholder" aria-hidden="true" />
+        )}
         <span className="article-index">{String(index).padStart(2, "0")}</span>
         <ArrowUpRight className="card-arrow" />
       </Link>
@@ -25,7 +30,7 @@ export function ArticleCard({
         <span>{article.category}</span>
         <span>{article.date}</span>
       </div>
-      <Link to={`/articles/${article.id}`}>
+      <Link to={href}>
         <h3>{article.title}</h3>
       </Link>
       {!compact && <p>{article.excerpt}</p>}

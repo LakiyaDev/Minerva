@@ -20,6 +20,9 @@ return new class extends Migration
             // Readers authenticate with Google only and therefore have no
             // password hash. Staff accounts always have one.
             $table->string('password')->nullable();
+            $table->foreignUlid('university_id')->nullable()->constrained('universities')->restrictOnDelete();
+            $table->string('faculty')->nullable();
+            $table->string('phone', 20)->nullable();
             $table->boolean('is_active')->default(true);
             $table->timestamp('last_login_at')->nullable();
             $table->unsignedSmallInteger('failed_login_attempts')->default(0);

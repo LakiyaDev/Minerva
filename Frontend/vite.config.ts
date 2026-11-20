@@ -38,6 +38,20 @@ export default defineConfig(({ mode }) => {
       watch: {
         ignored: ["**/.figma/**"],
       },
+      // Forward API calls to the Laravel backend so the SPA can use
+      // Sanctum's HttpOnly session cookie without CORS friction.
+      proxy: {
+        "/api": {
+          target: process.env.VITE_BACKEND_URL || "http://localhost:8000",
+          changeOrigin: true,
+          secure: false,
+        },
+        "/sanctum": {
+          target: process.env.VITE_BACKEND_URL || "http://localhost:8000",
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
     preview: {
       host: process.env.FIGMA_DEV_SERVER_HOST || "0.0.0.0",

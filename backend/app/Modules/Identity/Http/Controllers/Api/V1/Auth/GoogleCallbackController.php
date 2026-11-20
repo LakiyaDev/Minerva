@@ -11,7 +11,7 @@ use App\Modules\Identity\Services\SessionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Socialite;
+use Laravel\Socialite\Facades\Socialite;
 use Throwable;
 
 final class GoogleCallbackController
