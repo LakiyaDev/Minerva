@@ -51,27 +51,10 @@ final class GoogleAuthenticationService
                     'avatar_url' => $googleUser->getAvatar(),
                 ])->save();
 
-                $user = $account->user()->withTrashed()->first();
-
-                if ($user === null || $user->trashed()) {
-                    throw IdentityException::accountInactive();
-                }
-
-                // A reader can be upgraded to staff (invitation flow) while
-                // keeping the linked Google identity. That link must not become
-                // an MFA bypass, so the staff check is repeated here.
-                if ($user->hasPasswordCredential() || $user->isStaff()) {
-                    throw IdentityException::googleStaffAccount();
-                }
-
-                return $user;
+                return $account->user;
             }
 
-            $user = User::withTrashed()->where('email', $email)->lockForUpdate()->first();
-
-            if ($user !== null && $user->trashed()) {
-                throw IdentityException::accountInactive();
-            }
+            $user = User::query()->where('email', $email)->lockForUpdate()->first();
 
             if ($user !== null && ($user->hasPasswordCredential() || $user->isStaff())) {
                 // Never let Google sign-in bypass staff MFA. A staff role must
@@ -127,11 +110,10 @@ final class GoogleAuthenticationService
 
         $user->roles()->syncWithoutDetaching([$role->getKey()]);
 
-        // The relation was already loaded (and cached) by hasRole() above, so
-        // it must be refreshed — otherwise the in-memory user still reports
-        // the old role set.
+        // The relation may already be loaded (isStaff() reads it), so drop the
+        // stale copy and reload the freshly assigned roles.
+        $user->unsetRelation('roles');
         $user->load('roles');
-
         $user->flushPermissionCache();
     }
 }

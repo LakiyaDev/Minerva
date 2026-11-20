@@ -263,7 +263,7 @@ invalidated after every role/grant mutation.
 | `article.unpublish` | | | ✓ |
 | `article.feature` | | | ✓ |
 | `comment.moderate` | | | ✓ |
-| `content.manage` | | | ✓ |
+| `content.manage` | | | ✓ *(reserved; public site content is frontend-static)* |
 | `user.manage` | | | ✓ |
 | `publisher.manage` | | | ✓ |
 | `analytics.view_own` | | ✓ | ✓ |
@@ -505,8 +505,11 @@ php artisan test --testsuite=Feature
 5. **Identity events consumers**: Audit currently records via the logger
    directly; Analytics/Notifications can subscribe to the emitted events.
 6. **OpenAPI contract tests** and CI (Pint + Pest + migration check).
-7. **Next module**: Content Management (`/public/*`, `/workshops`, CMS), then
-   Articles & Editorial, Voting, Comments, Analytics, Integrations, Media.
+7. **Subsequent modules**: Articles & Editorial and Voting are implemented
+   (`docs/articles-and-editorial.md`, `docs/voting.md`); next modules are
+   Comments & Moderation, Analytics, Integrations, and Audit. Public
+   informational pages (workshops, timeline, sponsors, committee, magazine) are
+   hardcoded in the frontend with no backend Content Management module needed.
 
 ---
 

@@ -16,4 +16,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     require app_path('Modules/Identity/Routes/api.php');
+    require app_path('Modules/Articles/Routes/api.php');
+    require app_path('Modules/Comments/Routes/api.php');
+    require app_path('Modules/Voting/Routes/api.php');
 });

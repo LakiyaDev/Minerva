@@ -1,11 +1,19 @@
 openapi: 3.1.0
 info:
-  title: Minerva Digital Platform API — Identity & Access
-  version: 1.0.0
+  title: Minerva Digital Platform API — Identity, Articles & Voting
+  version: 1.2.0
   description: |
-    Identity & Access Management contract for the Minerva Digital Platform.
-    Readers authenticate with Google OAuth; staff use password + TOTP.
-    Browser clients use the Sanctum session cookie (send credentials).
+    Identity & Access, Articles & Editorial, and Voting contracts for the Minerva
+    Digital Platform. Readers authenticate with Google OAuth; staff use password +
+    TOTP. Browser clients use the Sanctum session cookie (send credentials).
+
+    The editorial state machine is: draft → pending_review → approved →
+    published, with rejected (rework) and unpublished states, plus direct
+    publishing for publishers holding an active direct-publish grant.
+
+    Voting enforces server-time windows, an irrevocable one-vote-per-article
+    database constraint (`409 Conflict` on duplicates), and authenticated
+    participant access to live tallies and standings (`FR-38`).
   contact:
     name: Minerva Platform Team
 servers:
@@ -17,6 +25,9 @@ tags:
   - name: Auth
   - name: Me
   - name: Admin
+  - name: Articles
+  - name: Publisher
+  - name: Voting
 
 security:
   - cookieAuth: []
@@ -829,6 +840,868 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /articles:
+    get:
+      tags: [Articles]
+      summary: Public article catalogue
+      description: |
+        Returns published articles only. Drafts, pending, approved, rejected and
+        unpublished articles are never visible here. Results are paginated and
+        support safe filtering and sorting allow-lists.
+      security: []
+      parameters:
+        - name: search
+          in: query
+          description: Free-text match against the title and abstract.
+          schema: { type: string, maxLength: 255 }
+        - name: category
+          in: query
+          description: Category slug.
+          schema: { type: string, maxLength: 128 }
+        - name: sort
+          in: query
+          description: Sort order allow-list.
+          schema:
+            type: string
+            enum: [newest, popular]
+            default: newest
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 12 }
+      responses:
+        '200':
+          description: Published articles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ArticleSummary' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /articles/{slug}:
+    get:
+      tags: [Articles]
+      summary: Public article detail
+      description: |
+        Resolves a published article by slug (or opaque id). Any other status
+        returns 404 so unpublished content cannot be probed. Workflow history
+        is only included for the author and editorial staff.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string, maxLength: 255 }
+      responses:
+        '200':
+          description: Article detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /articles/{article}/attachments/{attachment}/download:
+    get:
+      tags: [Articles]
+      summary: Download an article attachment
+      description: |
+        Streams or downloads an attachment. Publicly accessible for published articles;
+        drafts and unreviewed articles are restricted to the author and editorial staff.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+        - name: attachment
+          in: path
+          required: true
+          schema: { type: string, format: ulid }
+      responses:
+        '200':
+          description: File stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /article-categories:
+    get:
+      tags: [Articles]
+      summary: Editorial categories
+      description: Returns every editorial category with the number of published articles it currently holds.
+      security: []
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ArticleCategory' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /publisher/articles:
+    get:
+      tags: [Publisher]
+      summary: List the caller's own articles
+      description: Returns only articles authored by the authenticated publisher.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, pending_review, approved, rejected, published, unpublished]
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Own articles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ArticleSummary' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Publisher]
+      summary: Create an article draft
+      description: Creates a draft owned by the authenticated publisher. The slug is generated from the title.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArticleDraftInput' }
+      responses:
+        '201':
+          description: Draft created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /publisher/articles/{article}:
+    get:
+      tags: [Publisher]
+      summary: View an own article
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      responses:
+        '200':
+          description: Article detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Publisher]
+      summary: Update a draft or rejected article
+      description: Only the owner may edit, and only while the article is a draft or has been rejected.
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArticleUpdateInput' }
+      responses:
+        '200':
+          description: Article updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The article is not editable in its current status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /publisher/articles/{article}/submit:
+    post:
+      tags: [Publisher]
+      summary: Submit an article for review
+      description: Moves a draft or rejected article to pending_review.
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      responses:
+        '200':
+          description: Article submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /publisher/articles/{article}/publish:
+    post:
+      tags: [Publisher]
+      summary: Publish an own article directly
+      description: |
+        Requires the article.publish_own permission, which is only effective while an
+        active publisher grant sets can_publish_directly.
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      responses:
+        '200':
+          description: Article published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /publisher/articles/{article}/attachments:
+    post:
+      tags: [Publisher]
+      summary: Upload an attachment to an editable article
+      description: |
+        Accepts PDF manuscripts or images (PNG, JPEG, WEBP) up to 10 MB.
+        Restricted to the article owner while draft/rejected, or editorial staff.
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                kind:
+                  type: string
+                  enum: [manuscript, supplement, figure, document]
+                  default: document
+      responses:
+        '201':
+          description: Attachment uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleAttachment' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /publisher/articles/{article}/attachments/{attachment}:
+    delete:
+      tags: [Publisher]
+      summary: Delete an attachment from an editable article
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+        - name: attachment
+          in: path
+          required: true
+          schema: { type: string, format: ulid }
+      responses:
+        '204':
+          description: Attachment deleted
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/articles:
+    get:
+      tags: [Admin]
+      summary: List every article across all statuses
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, pending_review, approved, rejected, published, unpublished]
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 255 }
+        - name: category
+          in: query
+          schema: { type: string, maxLength: 128 }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Articles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ArticleSummary' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/articles/review-queue:
+    get:
+      tags: [Admin]
+      summary: List articles awaiting review
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Pending articles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ArticleSummary' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/articles/{article}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve a pending article
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      responses:
+        '200':
+          description: Article approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/articles/{article}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject a pending article with a reason
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 5
+                  maxLength: 1000
+      responses:
+        '200':
+          description: Article rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/articles/{article}/publish:
+    post:
+      tags: [Admin]
+      summary: Publish an approved article
+      description: Also used to republish an unpublished article.
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      responses:
+        '200':
+          description: Article published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/articles/{article}/unpublish:
+    post:
+      tags: [Admin]
+      summary: Remove an article from public view
+      description: Moves a published article to unpublished. It disappears from the public catalogue and returns 404 on its public URL.
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      responses:
+        '200':
+          description: Article unpublished
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Illegal status transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /admin/articles/{article}/feature:
+    post:
+      tags: [Admin]
+      summary: Mark or unmark an article as featured
+      parameters:
+        - $ref: '#/components/parameters/ArticleUlid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_featured]
+              properties:
+                is_featured: { type: boolean }
+      responses:
+        '200':
+          description: Featured flag updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /voting/status:
+    get:
+      tags: [Voting]
+      summary: Current active voting period and server status
+      security: []
+      responses:
+        '200':
+          description: Current voting window status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/VotingStatus' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /articles/{article}/votes:
+    post:
+      tags: [Voting]
+      summary: Cast a final, irrevocable vote on a published article
+      description: Requires participant.vote permission and an open voting period. Duplicate votes are rejected by the database unique index and mapped to 409 Conflict.
+      parameters:
+        - name: article
+          in: path
+          required: true
+          description: Published article ULID or slug.
+          schema: { type: string }
+      responses:
+        '201':
+          description: Vote recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [vote, article_id, vote_count, voting_period_id]
+                    properties:
+                      vote: { $ref: '#/components/schemas/Vote' }
+                      article_id: { type: string }
+                      vote_count: { type: integer }
+                      voting_period_id: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Vote already cast on this article
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Voting period inactive or outside window
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /articles/{article}/vote-results:
+    get:
+      tags: [Voting]
+      summary: Live vote result for a published article (authenticated participants only)
+      parameters:
+        - name: article
+          in: path
+          required: true
+          description: Published article ULID or slug.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Live article vote result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/ArticleVoteResult' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /me/votes:
+    get:
+      tags: [Voting]
+      summary: Caller's cast vote history
+      responses:
+        '200':
+          description: Participant vote records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Vote' }
+                  meta:
+                    type: object
+                    properties:
+                      total: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /leaderboard:
+    get:
+      tags: [Voting]
+      summary: Live competition standings across published articles
+      responses:
+        '200':
+          description: Ranked leaderboard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/LeaderboardEntry' }
+                  meta:
+                    type: object
+                    properties:
+                      total_votes: { type: integer }
+                      updated_at: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/voting-periods:
+    get:
+      tags: [Admin, Voting]
+      summary: List voting periods
+      responses:
+        '200':
+          description: Paginated voting periods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/VotingPeriod' }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Admin, Voting]
+      summary: Create a voting period
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, starts_at, ends_at]
+              properties:
+                name: { type: string, maxLength: 128 }
+                starts_at: { type: string, format: date-time }
+                ends_at: { type: string, format: date-time }
+                is_active: { type: boolean }
+      responses:
+        '201':
+          description: Voting period created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/VotingPeriod' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/voting-periods/{voting_period}:
+    get:
+      tags: [Admin, Voting]
+      summary: Show a voting period
+      parameters:
+        - $ref: '#/components/parameters/VotingPeriodUlid'
+      responses:
+        '200':
+          description: Voting period detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/VotingPeriod' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Admin, Voting]
+      summary: Update a voting period
+      parameters:
+        - $ref: '#/components/parameters/VotingPeriodUlid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 128 }
+                starts_at: { type: string, format: date-time }
+                ends_at: { type: string, format: date-time }
+                is_active: { type: boolean }
+      responses:
+        '200':
+          description: Updated voting period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/VotingPeriod' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /admin/voting-periods/{voting_period}/activate:
+    post:
+      tags: [Admin, Voting]
+      summary: Activate a voting period and deactivate all others
+      parameters:
+        - $ref: '#/components/parameters/VotingPeriodUlid'
+      responses:
+        '200':
+          description: Activated voting period
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/VotingPeriod' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/voting/statistics:
+    get:
+      tags: [Admin, Voting]
+      summary: Platform-wide voting statistics for administrators
+      responses:
+        '200':
+          description: Aggregated voting statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/VotingStatistics' }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
 components:
   securitySchemes:
     cookieAuth:
@@ -847,6 +1720,18 @@ components:
       in: path
       required: true
       schema: { type: string, example: 01J8Z0000000000000000000AA }
+    ArticleUlid:
+      name: article
+      in: path
+      required: true
+      description: Opaque article ULID.
+      schema: { type: string, example: 01J8Z0000000000000000000AB }
+    VotingPeriodUlid:
+      name: voting_period
+      in: path
+      required: true
+      description: Opaque voting period ULID.
+      schema: { type: string, example: 01J8Z0000000000000000000AC }
 
   schemas:
     Error:
@@ -959,6 +1844,193 @@ components:
         per_page: { type: integer }
         total: { type: integer }
         last_page: { type: integer }
+    ArticleCategory:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id: { type: string }
+        name: { type: string, example: AI in Medicine }
+        slug: { type: string, example: ai-in-medicine }
+        description: { type: string, nullable: true }
+        articles_count:
+          type: integer
+          description: Number of published articles in this category.
+    ArticleAuthor:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    ArticleSummary:
+      type: object
+      required: [id, title, slug, abstract, status, is_featured, votes_count]
+      properties:
+        id: { type: string }
+        title: { type: string, maxLength: 255 }
+        slug: { type: string, maxLength: 255 }
+        abstract: { type: string }
+        category: { $ref: '#/components/schemas/ArticleCategory' }
+        author: { $ref: '#/components/schemas/ArticleAuthor' }
+        status:
+          type: string
+          enum: [draft, pending_review, approved, rejected, published, unpublished]
+        status_label: { type: string, example: Published }
+        is_featured: { type: boolean }
+        votes_count:
+          type: integer
+          description: Emitted as 0 on public article routes per FR-38; live totals belong to the Voting module (`/articles/{article}/vote-results`, `/leaderboard`).
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    ArticleDetail:
+      allOf:
+        - $ref: '#/components/schemas/ArticleSummary'
+        - type: object
+          required: [id, body]
+          properties:
+            body: { type: string }
+            attachments:
+              type: array
+              items: { $ref: '#/components/schemas/ArticleAttachment' }
+            status_history:
+              type: array
+              description: Only present for the author and editorial staff.
+              items:
+                type: object
+                properties:
+                  from_status: { type: string, nullable: true }
+                  to_status: { type: string }
+                  reason: { type: string, nullable: true }
+                  acted_by: { type: string, nullable: true }
+                  created_at: { type: string, format: date-time }
+    ArticleAttachment:
+      type: object
+      required: [id, original_name, mime_type, size_bytes, kind, download_url]
+      properties:
+        id: { type: string }
+        original_name: { type: string }
+        mime_type: { type: string }
+        size_bytes: { type: integer }
+        kind: { type: string, enum: [manuscript, supplement, figure, document], example: document }
+        download_url: { type: string }
+        created_at: { type: string, format: date-time }
+    ArticleDraftInput:
+      type: object
+      required: [title, abstract, body, category_id]
+      properties:
+        title: { type: string, maxLength: 255 }
+        abstract: { type: string }
+        body: { type: string }
+        category_id: { type: string }
+    ArticleUpdateInput:
+      type: object
+      description: Every field is optional; the slug is regenerated when the title changes.
+      properties:
+        title: { type: string, maxLength: 255 }
+        abstract: { type: string }
+        body: { type: string }
+        category_id: { type: string }
+    VotingPeriod:
+      type: object
+      required: [id, name, starts_at, ends_at, is_active, status, is_open, time_remaining_seconds]
+      properties:
+        id: { type: string }
+        name: { type: string, maxLength: 128 }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        is_active: { type: boolean }
+        status: { type: string, enum: [open, upcoming, closed] }
+        is_open: { type: boolean }
+        time_remaining_seconds: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    VotingStatus:
+      type: object
+      required: [status, is_open, server_time, period]
+      properties:
+        status: { type: string, enum: [open, upcoming, closed] }
+        is_open: { type: boolean }
+        server_time: { type: string, format: date-time }
+        period:
+          oneOf:
+            - $ref: '#/components/schemas/VotingPeriod'
+            - type: 'null'
+    Vote:
+      type: object
+      required: [id, article_id, voting_period_id, created_at]
+      properties:
+        id: { type: string }
+        article_id: { type: string }
+        voting_period_id: { type: string }
+        created_at: { type: string, format: date-time }
+        voting_period:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+        article:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string }
+            title: { type: string }
+            slug: { type: string }
+            category: { $ref: '#/components/schemas/ArticleCategory' }
+            author: { $ref: '#/components/schemas/ArticleAuthor' }
+    ArticleVoteResult:
+      type: object
+      required: [article_id, slug, title, vote_count, has_voted, voting_status, updated_at]
+      properties:
+        article_id: { type: string }
+        slug: { type: string }
+        title: { type: string }
+        vote_count: { type: integer }
+        rank: { type: integer, nullable: true }
+        has_voted: { type: boolean }
+        voting_status: { type: string, enum: [open, upcoming, closed] }
+        updated_at: { type: string, format: date-time }
+    LeaderboardEntry:
+      type: object
+      required: [rank, article_id, title, slug, vote_count, has_voted]
+      properties:
+        rank: { type: integer }
+        article_id: { type: string }
+        title: { type: string }
+        slug: { type: string }
+        category: { $ref: '#/components/schemas/ArticleCategory' }
+        author: { $ref: '#/components/schemas/ArticleAuthor' }
+        vote_count: { type: integer }
+        has_voted: { type: boolean }
+        published_at: { type: string, format: date-time, nullable: true }
+    VotingStatistics:
+      type: object
+      required: [total_votes, unique_voters, published_articles_count, active_period, top_articles, by_category, daily_activity]
+      properties:
+        total_votes: { type: integer }
+        unique_voters: { type: integer }
+        published_articles_count: { type: integer }
+        active_period:
+          oneOf:
+            - $ref: '#/components/schemas/VotingPeriod'
+            - type: 'null'
+        top_articles:
+          type: array
+          items: { $ref: '#/components/schemas/LeaderboardEntry' }
+        by_category:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              votes: { type: integer }
+              articles_count: { type: integer }
+        daily_activity:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              day: { type: string }
+              votes: { type: integer }
 
   responses:
     Unauthenticated:
