@@ -9,6 +9,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -126,6 +127,11 @@ final class ApiExceptionRenderer
         // Set it here to keep tracing consistent for success and failure.
         $headers['X-Request-ID'] = $requestId;
 
-        return response()->json($payload, $status, $headers);
+        // Build the response directly instead of through the response() helper:
+        // the helper resolves the response factory, which in turn resolves the
+        // 'view' service. When the application failed during boot, that binding
+        // does not exist and the error handler would fatal while reporting the
+        // original error.
+        return new JsonResponse($payload, $status, $headers);
     }
 }
