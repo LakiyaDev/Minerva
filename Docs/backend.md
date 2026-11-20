@@ -36,7 +36,6 @@ Laravel REST API ───── Laravel Reverb (authenticated WebSocket events)
 - Voting module with transactional duplicate-vote protection
 - Comment and moderation module
 - Analytics/reporting module
-- API-key management module for approved service integrations
 - Audit-log module
 - File-upload/storage module
 - Broadcast-event module for live voting updates
@@ -127,9 +126,9 @@ Implementation note: participants may be publishers, and administrators may also
 | `article_attachments` | `id`, `article_id`, `storage_disk`, `storage_key`, `original_name`, `mime_type`, `size_bytes`, `kind` | FK to article; never store public S3 secrets/URLs. |
 | `article_status_history` | `id`, `article_id`, `from_status`, `to_status`, `acted_by`, `reason`, `created_at` | Index `(article_id, created_at)`; append-only history. |
 
-Allowed article statuses: `draft`, `pending_review`, `approved`, `rejected`, `published`, `unpublished`.
+Allowed article statuses: `draft`, `published`, `unpublished`.
 
-The state transition service must validate allowed transitions. For example, only an owner with article-update rights can save a draft; only an administrator/reviewer can approve or reject; direct publish requires the publisher’s explicit direct-publish permission; only published articles appear in public listings.
+The state transition service must validate allowed transitions. An owner with article-update rights can save a draft and publish directly; only an administrator can unpublish/remove any published article or republish an unpublished article; only published articles appear in public listings.
 
 ### 4.4 Voting tables and transactional integrity
 
@@ -235,11 +234,9 @@ All endpoint paths below are relative to `/api/v1`. “Auth” means a valid use
 | GET/PATCH | `/admin/users` and `/admin/users/{user}` | `user.manage` | Find/manage user accounts and roles. |
 | POST/DELETE | `/admin/users/{user}/publisher-permission` | `publisher.manage` | Grant/revoke publisher capability. |
 | PATCH | `/admin/users/{user}/publisher-permission` | `publisher.manage` | Configure direct-publish eligibility. |
-| GET | `/admin/articles/review-queue` | `article.review` | Reviewable article list. |
-| POST | `/admin/articles/{article}/approve` | `article.review` | Approve article. |
-| POST | `/admin/articles/{article}/reject` | `article.review` | Reject article with reason. |
+| GET | `/admin/articles` | `article.unpublish` | List all articles for management. |
 | POST | `/admin/articles/{article}/publish` | `article.publish_any` | Publish article. |
-| POST | `/admin/articles/{article}/unpublish` | `article.unpublish` | Remove public visibility. |
+| POST | `/admin/articles/{article}/unpublish` | `article.unpublish` | Remove/unpublish any published article. |
 | POST | `/admin/articles/{article}/feature` | `article.feature` | Mark/unmark featured. |
 | GET/PATCH | `/admin/voting-periods` and `/admin/voting-periods/{period}` | `settings.manage` | Configure voting window. |
 | GET | `/admin/comments` | `comment.moderate` | Moderation queue. |
@@ -265,59 +262,9 @@ Authorization: Bearer <user-access-token>
 
 The client must treat `401` as an expired/invalid session and `403` as an authenticated but unauthorized request. It must not retry votes or moderation mutations automatically unless the API explicitly supports an idempotency key.
 
-### 6.2 Server-to-server API keys
-
-API keys are for explicitly approved service-to-service integrations (for example, a reporting tool or institutional system). They are **not** a substitute for user login and must never be embedded in the React app, browser storage, client-side environment variables, screenshots, or source control.
-
-Recommended key format:
-
-```text
-mnv_live_<public_key_id>_<secret>
-```
-
-Only a SHA-256/HMAC hash of the full secret is stored. The plaintext key is displayed exactly once when created.
-
-#### API-key table
-
-| Table | Key fields | Security rules |
-|---|---|---|
-| `api_keys` | `id`, `public_id`, `name`, `secret_hash`, `scopes`, `created_by`, `last_used_at`, `expires_at`, `revoked_at` | Unique `public_id`; store only hash; encrypted/protected scopes metadata; index active keys. |
-
-Suggested service scopes: `analytics.read`, `content.read`, `webhook.receive`. Do not grant broad user-management, voting, editorial approval, or database access to an API key unless a formally approved integration requires it.
-
-#### API-key lifecycle endpoints
-
-These endpoints are administrator-only and should require recent re-authentication/MFA where available.
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/admin/api-keys` | List key metadata only—never return secrets. |
-| POST | `/admin/api-keys` | Create scoped, expiring key; plaintext secret returned once. |
-| GET | `/admin/api-keys/{apiKey}` | View key metadata and recent usage. |
-| PATCH | `/admin/api-keys/{apiKey}` | Rename, modify permitted scopes/expiry where policy allows. |
-| POST | `/admin/api-keys/{apiKey}/rotate` | Create replacement secret; revoke old secret on the defined grace schedule. |
-| POST | `/admin/api-keys/{apiKey}/revoke` | Immediately revoke key and record audit entry. |
-
-Service request example:
-
-```http
-GET /api/v1/integrations/analytics/articles HTTP/1.1
-Accept: application/json
-X-API-Key: mnv_live_publicid_secret
-```
-
-Alternatively use `Authorization: Bearer <service-api-key>`; choose one convention and document it in OpenAPI. Middleware must verify the hash in constant time, reject expired/revoked keys, apply scopes, record `last_used_at` asynchronously, and enforce a dedicated rate limit.
-
-### 6.3 API-key safeguards
-
-- Generate secrets from a cryptographically secure random source with at least 256 bits of entropy.
-- Redact `Authorization`, `X-API-Key`, cookies, passwords, reset tokens, and presigned URLs in all logs/error tools.
-- Rate-limit by key, route, IP, and endpoint sensitivity; return `429` with retry guidance.
-- Add expiration to every new key; rotate regularly and revoke immediately if exposed.
-- Audit creation, viewing metadata, rotation, scope change, and revocation.
-- Restrict keys by minimum scope and optionally by IP allow-list for trusted integrations.
-- Do not create an endpoint that reveals a previously issued full key.
-- Store production keys only in a secrets manager/CI secret store, never in `.env` committed to Git.
+> **Architecture Decision — No Headless Integrations / API Keys & Platform Settings Table:**
+> 1. **No Service API Keys / Integrations:** The platform is designed exclusively for user-facing browser access via Google OAuth and staff password/MFA Sanctum sessions. External machine-to-machine integrations and service API keys are not required and are omitted.
+> 2. **No Dynamic Platform Settings Table:** System configuration (contact email, site notices, maintenance mode) is maintained via `.env` environment variables and static configuration files. Dynamic `platform_settings` database tables and `/admin/settings` endpoints are omitted to keep the system simple and reliable.
 
 ### 6.4 File-upload integration
 
@@ -410,8 +357,7 @@ Security schemes to document:
 4. Implement voting period, transaction-safe vote creation, vote results, and Reverb broadcasting.
 5. Implement comments, moderation, and audit logging.
 6. Implement publisher/platform analytics with ownership protections.
-7. Implement administrator management endpoints, Integrations, and API-key lifecycle.
-8. Add security hardening, queues, backups/monitoring integration, OpenAPI completion, and full test suite.
+7. Implement administrator management endpoints, security hardening, queues, backups/monitoring integration, OpenAPI completion, and full test suite.
 
 ## 11. Backend Definition of Done
 
@@ -420,7 +366,6 @@ Security schemes to document:
 - The unique vote constraint and transaction prevent duplicate votes under concurrency.
 - Only published articles/content are returned through public routes.
 - Publisher analytics are isolated to owned articles unless platform-wide permission is present.
-- API keys are scoped, hashed, expiring, rotatable, revocable, audited, and never exposed to browser clients.
 - OpenAPI 3.1 documentation, automated tests, logs/audits, error handling, and rate limits are complete.
 - Security review and acceptance tests demonstrate the SRS requirements.
 

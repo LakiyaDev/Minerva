@@ -60,6 +60,10 @@ final class PermissionResolver
 
     public function canPublishDirectly(User $user): bool
     {
+        if ($user->hasRole('publisher') || $user->hasRole('administrator')) {
+            return true;
+        }
+
         return DB::table('publisher_permissions')
             ->where('user_id', $user->getKey())
             ->whereNull('revoked_at')

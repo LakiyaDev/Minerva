@@ -18,7 +18,7 @@ return new class extends Migration
             $table->string('from_status', 32)->nullable();
             $table->string('to_status', 32);
             $table->foreignUlid('acted_by')->nullable()->constrained('users')->nullOnDelete();
-            $table->text('reason')->nullable();
+            $table->string('reason', 500)->nullable();
             $table->timestamp('created_at')->useCurrent();
 
             $table->index(['article_id', 'created_at'], 'article_status_history_article_created_index');

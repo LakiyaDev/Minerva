@@ -111,8 +111,8 @@ Recommended feature modules: `auth`, `public-content`, `articles`, `voting`, `co
 |---|---|---|---|
 | FE-40 | Publisher dashboard | Owned article list, status summary, create-article action, review feedback, and own-article engagement overview | FR-56 |
 | FE-41 | Article editor | Title, abstract/introduction, body editor, category selector, attachment/image upload, draft save, and validation | FR-20, FR-21, FR-26 |
-| FE-42 | Article workflow controls | Render permitted actions based on article status and publisher permissions: save draft, submit review, or direct publish | FR-19–FR-24 |
-| FE-43 | Article status/history UI | Clearly display Draft, Pending Review, Approved, Rejected, Published, and Unpublished; show any available review feedback/history | FR-22, FR-27 |
+| FE-42 | Article workflow controls | Render permitted actions based on article status and publisher permissions: save draft or publish directly | FR-19–FR-24 |
+| FE-43 | Article status/history UI | Clearly display Draft, Published, and Unpublished statuses; show status history | FR-22, FR-27 |
 | FE-44 | File upload UX | File type/size guidance, upload progress, failures/retry, attachment list, and remove action only where permitted | FR-20, FR-26 |
 | FE-45 | Own-article analytics | Present votes, comment count, publication status, and available engagement statistics for owned articles | FR-50–FR-52 |
 | FE-46 | Publisher authorization states | Show an informative unavailable state when a user lacks publisher access or direct publishing permission | FR-18–FR-19 |
@@ -129,7 +129,7 @@ Recommended feature modules: `auth`, `public-content`, `articles`, `voting`, `co
 |---|---|---|---|
 | FE-50 | Administrator dashboard | Overview cards and navigation for users, articles, voting, comments, analytics, and audit activity | FR-57 |
 | FE-51 | User management | Search/list users, inspect roles, grant/revoke publisher permission, configure direct-publish setting, confirm high-impact changes | FR-18–FR-19 |
-| FE-52 | Article review queue | Filterable pending list; article preview; approve/reject; optional feedback; publish/unpublish/feature controls | FR-23–FR-24 |
+| FE-52 | Article management | Filterable article list; article preview; unpublish/remove any published article; publish/feature controls | FR-24 |
 | FE-53 | Content management screens *(Not needed)* | **Out of Scope / Frontend Static:** workshops, timeline, sponsors, committee, and magazine content are hardcoded in the frontend; no admin CMS screens or backend API needed | FR-10 (updated) |
 | FE-54 | Voting management | Configure and display voting start/end times; show current open/closed status; use explicit confirmation for changes | FR-39–FR-41 |
 | FE-55 | Comment moderation queue | Filter comments; view author/article/timestamp; remove inappropriate comments with mandatory confirmation and reason where API supports it | FR-45–FR-47 |

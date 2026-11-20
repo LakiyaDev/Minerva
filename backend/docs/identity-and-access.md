@@ -507,7 +507,7 @@ php artisan test --testsuite=Feature
 6. **OpenAPI contract tests** and CI (Pint + Pest + migration check).
 7. **Subsequent modules**: Articles & Editorial and Voting are implemented
    (`docs/articles-and-editorial.md`, `docs/voting.md`); next modules are
-   Comments & Moderation, Analytics, Integrations, and Audit. Public
+   Comments & Moderation, Analytics, and Audit. Public
    informational pages (workshops, timeline, sponsors, committee, magazine) are
    hardcoded in the frontend with no backend Content Management module needed.
 

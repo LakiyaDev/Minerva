@@ -6,6 +6,7 @@ use App\Modules\Identity\Database\Seeders\RolePermissionSeeder;
 use App\Modules\Identity\Models\Role;
 use App\Modules\Identity\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PragmaRX\Google2FA\Google2FA;
 use Tests\TestCase;
 
 uses(TestCase::class, RefreshDatabase::class)->in('Feature');
@@ -39,7 +40,7 @@ function identityUser(string $role, array $attributes = []): User
 
 function enableTotp(User $user): string
 {
-    $secret = (new PragmaRX\Google2FA\Google2FA)->generateSecretKey(32);
+    $secret = (new Google2FA)->generateSecretKey(32);
 
     $user->forceFill([
         'two_factor_secret' => $secret,

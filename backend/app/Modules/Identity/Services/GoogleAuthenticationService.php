@@ -51,9 +51,9 @@ final class GoogleAuthenticationService
                     'avatar_url' => $googleUser->getAvatar(),
                 ])->save();
 
-                $user = $account->user()->withTrashed()->first();
+                $user = $account->user()->first();
 
-                if ($user === null || $user->trashed()) {
+                if ($user === null || ! $user->isActive()) {
                     throw IdentityException::accountInactive();
                 }
 
@@ -67,9 +67,9 @@ final class GoogleAuthenticationService
                 return $user;
             }
 
-            $user = User::withTrashed()->where('email', $email)->lockForUpdate()->first();
+            $user = User::query()->where('email', $email)->lockForUpdate()->first();
 
-            if ($user !== null && $user->trashed()) {
+            if ($user !== null && ! $user->isActive()) {
                 throw IdentityException::accountInactive();
             }
 

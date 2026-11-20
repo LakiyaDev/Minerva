@@ -38,8 +38,6 @@ it('records an append-only history entry for every transition', function (): voi
         ->and($creation->to_status)->toBe(ArticleStatus::Draft->value)
         ->and($creation->acted_by)->toBe($author->getKey());
 
-    $workflow->transition($article, ArticleStatus::PendingReview, $author);
-    $workflow->transition($article, ArticleStatus::Approved, $author);
     $workflow->transition($article, ArticleStatus::Published, $author);
     $workflow->transition($article, ArticleStatus::Unpublished, $author);
 
@@ -49,11 +47,9 @@ it('records an append-only history entry for every transition', function (): voi
         ->orderBy('id')
         ->get();
 
-    expect($history)->toHaveCount(5)
+    expect($history)->toHaveCount(3)
         ->and($history->pluck('to_status')->all())->toBe([
             'draft',
-            'pending_review',
-            'approved',
             'published',
             'unpublished',
         ]);
@@ -70,7 +66,7 @@ it('rejects an illegal transition', function (): void {
         'author_id' => $author->getKey(),
     ]);
 
-    expect(fn () => $workflow->transition($article, ArticleStatus::Approved, $author))
+    expect(fn () => $workflow->transition($article, ArticleStatus::Unpublished, $author))
         ->toThrow(ArticleException::class);
 
     expect($article->fresh()->status)->toBe(ArticleStatus::Draft);
@@ -80,7 +76,7 @@ it('keeps the published timestamp in sync with the published status', function (
     $author = identityUser('publisher');
     $workflow = app(ArticleWorkflowService::class);
 
-    $article = Article::factory()->withStatus(ArticleStatus::Approved)->create([
+    $article = Article::factory()->withStatus(ArticleStatus::Draft)->create([
         'author_id' => $author->getKey(),
     ]);
 
@@ -89,24 +85,6 @@ it('keeps the published timestamp in sync with the published status', function (
     $workflow->transition($article, ArticleStatus::Published, $author);
 
     expect($article->fresh()->published_at)->not->toBeNull();
-});
-
-it('records the actor and reason of a rejection', function (): void {
-    $admin = identityUser('administrator');
-    $workflow = app(ArticleWorkflowService::class);
-
-    $article = Article::factory()->withStatus(ArticleStatus::PendingReview)->create();
-
-    $workflow->transition($article, ArticleStatus::Rejected, $admin, 'Needs more citations.');
-
-    $entry = ArticleStatusHistory::query()
-        ->where('article_id', $article->getKey())
-        ->where('to_status', ArticleStatus::Rejected->value)
-        ->firstOrFail();
-
-    expect($entry->acted_by)->toBe($admin->getKey())
-        ->and($entry->reason)->toBe('Needs more citations.')
-        ->and($entry->from_status)->toBe(ArticleStatus::PendingReview->value);
 });
 
 it('never writes a history row when a transition is refused', function (): void {
@@ -120,7 +98,7 @@ it('never writes a history row when a transition is refused', function (): void 
     $before = ArticleStatusHistory::query()->count();
 
     try {
-        $workflow->transition($article, ArticleStatus::Rejected, $author);
+        $workflow->transition($article, ArticleStatus::Unpublished, $author);
     } catch (ArticleException) {
         // expected
     }

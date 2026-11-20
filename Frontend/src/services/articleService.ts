@@ -1,12 +1,6 @@
 import { apiRequest, apiRequestEnvelope, type ApiEnvelope } from "./apiClient";
 
-export type ArticleStatus =
-  | "draft"
-  | "pending_review"
-  | "approved"
-  | "rejected"
-  | "published"
-  | "unpublished";
+export type ArticleStatus = "draft" | "published" | "unpublished";
 
 export type ArticleCategoryDto = {
   id: string;
@@ -160,14 +154,6 @@ export async function updateArticleDraft(
   return response.data;
 }
 
-export async function submitArticleForReview(id: string): Promise<ArticleDetailDto> {
-  const response = await apiRequest<{ data: ArticleDetailDto }>(
-    `/publisher/articles/${encodeURIComponent(id)}/submit`,
-    { method: "POST" },
-  );
-  return response.data;
-}
-
 export async function publishArticle(id: string): Promise<ArticleDetailDto> {
   const response = await apiRequest<{ data: ArticleDetailDto }>(
     `/publisher/articles/${encodeURIComponent(id)}/publish`,
@@ -188,29 +174,6 @@ export function getAdminArticles(
       per_page: params.per_page,
     },
   });
-}
-
-export function getReviewQueue(): Promise<ApiEnvelope<ArticleSummaryDto[]>> {
-  return apiRequestEnvelope<ArticleSummaryDto[]>("/admin/articles/review-queue");
-}
-
-export async function approveArticle(id: string): Promise<ArticleDetailDto> {
-  const response = await apiRequest<{ data: ArticleDetailDto }>(
-    `/admin/articles/${encodeURIComponent(id)}/approve`,
-    { method: "POST" },
-  );
-  return response.data;
-}
-
-export async function rejectArticle(id: string, reason: string): Promise<ArticleDetailDto> {
-  const response = await apiRequest<{ data: ArticleDetailDto }>(
-    `/admin/articles/${encodeURIComponent(id)}/reject`,
-    {
-      method: "POST",
-      body: { reason },
-    },
-  );
-  return response.data;
 }
 
 export async function adminPublishArticle(id: string): Promise<ArticleDetailDto> {

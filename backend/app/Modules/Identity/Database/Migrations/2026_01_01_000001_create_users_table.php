@@ -32,9 +32,10 @@ return new class extends Migration
             $table->timestamp('two_factor_confirmed_at')->nullable();
             $table->rememberToken();
             $table->timestamps();
-            $table->softDeletes();
 
-            $table->index(['is_active', 'deleted_at']);
+            // Schema v1.1 §1: soft deletes are not used. Accounts are retired
+            // with `is_active = 0` and are never hard-deleted.
+            $table->index('is_active');
         });
     }
 

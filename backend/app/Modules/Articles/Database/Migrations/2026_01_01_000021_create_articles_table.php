@@ -20,17 +20,19 @@ return new class extends Migration
             $table->string('title', 255);
             $table->string('slug', 255)->unique();
             $table->text('abstract');
-            $table->longText('body');
+            $table->mediumText('body');
             // Allowed values: draft, pending_review, approved, rejected,
             // published, unpublished. Enforced by the workflow state machine.
             $table->string('status', 32)->default('draft');
             $table->boolean('is_featured')->default(false);
             $table->timestamp('published_at')->nullable();
             $table->timestamps();
-            $table->softDeletes();
 
+            // Schema v1.1 §1: articles are never soft-deleted; an article that
+            // leaves the catalogue moves to the `unpublished` status.
             $table->index(['status', 'published_at'], 'articles_status_published_index');
             $table->index(['author_id', 'status'], 'articles_author_status_index');
+            $table->index('category_id');
         });
     }
 

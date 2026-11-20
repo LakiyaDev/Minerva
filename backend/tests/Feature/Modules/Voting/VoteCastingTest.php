@@ -146,9 +146,6 @@ it('rejects votes on non-published articles', function (ArticleStatus $status): 
         ->assertJsonPath('code', 'article_not_eligible');
 })->with([
     'draft' => ArticleStatus::Draft,
-    'pending_review' => ArticleStatus::PendingReview,
-    'approved' => ArticleStatus::Approved,
-    'rejected' => ArticleStatus::Rejected,
     'unpublished' => ArticleStatus::Unpublished,
 ]);
 

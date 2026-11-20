@@ -55,7 +55,7 @@ This schema is intentionally portable across **both** databases, so your suggest
 7. **Ownership is mandatory.** `articles.author_id` is `NOT NULL` and `RESTRICT`-protected (SRS §10 "Critical Database Constraints").
 8. **Post-moderation for comments.** Comments are visible immediately on submission; administrators remove afterwards — the `pending` status does not exist (decision D3).
 9. **University eligibility via lookup table.** A `universities` lookup table with a nullable `users.university_id` FK prevents spelling mismatches; profile fields live directly on `users` while their count stays below the 6–7-field threshold for a separate profile table (decision D1).
-10. **`platform_settings` included** for FR-10 dashboard-managed site content and configuration (decision D2).
+10. **Static Configuration & No API Keys.** Platform configuration (contact email, site notices, maintenance mode) is managed via `.env` environment variables and frontend configuration without a `platform_settings` table (decision D2). Service API keys and integrations are omitted because all platform interactions are user-facing via browser sessions.
 
 ---
 
@@ -84,7 +84,6 @@ This schema is intentionally portable across **both** databases, so your suggest
 | E-Magazine files | `e_magazine_files` | 4.5 |
 | Article analytics / engagement records | `article_vote_summaries` + derived queries | 4.3 |
 | Audit logs | `audit_logs` | 4.7 |
-| *(backend.md §7.2)* Service API keys | `api_keys` | 4.6 |
 | *(framework-managed)* Sanctum tokens | `personal_access_tokens` | 4.8 |
 
 ---
@@ -227,14 +226,14 @@ This schema is intentionally portable across **both** databases, so your suggest
 | `slug` | `VARCHAR(255)` | NO | — | UNIQUE | Used in public URLs (`{article:slug}`) |
 | `abstract` | `TEXT` | NO | — | | Abstract / introduction |
 | `body` | `MEDIUMTEXT` | NO | — | | Full article body |
-| `status` | `VARCHAR(20)` | NO | `draft` | | Editorial workflow (FR-22); allowed: `draft, pending_review, approved, rejected, published, unpublished` (Laravel validation — D4) |
+| `status` | `VARCHAR(20)` | NO | `draft` | | Editorial workflow (FR-22); allowed: `draft, published, unpublished` (Laravel validation — D4) |
 | `is_featured` | `TINYINT(1)` | NO | `0` | | FR-24 |
 | `published_at` | `TIMESTAMP` | YES | NULL | | Set on publish |
 | `created_at` / `updated_at` | `TIMESTAMP` | YES | NULL | | |
 
 **Indexes:** `(status, published_at)` · `(author_id, status)` · `(category_id)` — plus UNIQUE `slug`, `ulid`.
 
-**Allowed transitions (service-enforced, logged in `article_status_history`):** only an owner with `article.update_own` saves drafts; only reviewers approve/reject; direct publish requires `can_publish_directly`; only `published` rows are publicly visible (FR-25).
+**Allowed transitions (service-enforced, logged in `article_status_history`):** an owner with `article.update_own` saves drafts and publishes directly with `article.publish_own`; only administrators unpublish/remove published articles; only `published` rows are publicly visible (FR-25).
 
 #### 4.2.3 `article_attachments`
 
@@ -456,30 +455,9 @@ All content tables share `status VARCHAR(20) DEFAULT 'draft'` (allowed values `d
 
 ---
 
-### 4.6 Integrations
+### 4.6 Audit
 
-#### 4.6.1 `api_keys` — backend.md §7.2
-
-| Column | Type | Null | Default | Keys | Notes |
-|---|---|---|---|---|---|
-| `id` | `BIGINT UNSIGNED` | NO | auto | PK | |
-| `public_id` | `VARCHAR(64)` | NO | — | UNIQUE | Embedded in `mnv_live_<public_id>_<secret>` |
-| `name` | `VARCHAR(150)` | NO | — | | |
-| `secret_hash` | `CHAR(64)` | NO | — | | SHA-256 hex; **plaintext never stored or re-shown** |
-| `scopes` | `JSON` | NO | — | | e.g. `["analytics.read","content.read"]` |
-| `created_by` | `BIGINT UNSIGNED` | YES | NULL | FK → `users.id` | ON DELETE SET NULL |
-| `last_used_at` | `TIMESTAMP` | YES | NULL | | Updated asynchronously |
-| `expires_at` | `TIMESTAMP` | YES | NULL | | Every new key gets an expiry |
-| `revoked_at` | `TIMESTAMP` | YES | NULL | | Immediate revocation |
-| `created_at` / `updated_at` | `TIMESTAMP` | YES | NULL | | |
-
-- Indexes: `(expires_at)`, `(created_by)`. Lookup path: parse `public_id` → unique index → constant-time hash comparison.
-
----
-
-### 4.7 Audit
-
-#### 4.7.1 `audit_logs` — SRS §8 Security, backend.md §9.3 (append-only)
+#### 4.6.1 `audit_logs` — SRS §8 Security, backend.md §9.3 (append-only)
 
 | Column | Type | Null | Keys | Notes |
 |---|---|---|---|---|
@@ -497,24 +475,11 @@ All content tables share `status VARCHAR(20) DEFAULT 'draft'` (allowed values `d
 
 ---
 
-### 4.8 Framework-Managed and Additional Tables
+### 4.7 Framework-Managed Tables
 
 #### `personal_access_tokens` (created automatically by Laravel Sanctum — do not hand-write)
 
 Standard Sanctum structure: `id`, `tokenable_type`, `tokenable_id`, `name`, `token` (UNIQUE), `abilities`, `last_used_at`, `expires_at`, timestamps.
-
-#### `platform_settings` *(confirmed — decision D2, FR-10)*
-
-| Column | Type | Null | Keys | Notes |
-|---|---|---|---|---|
-| `id` | `BIGINT UNSIGNED` | NO | PK | |
-| `setting_group` | `VARCHAR(100)` | NO | UNIQUE(1) with key | e.g. `competition`, `homepage` |
-| `setting_key` | `VARCHAR(150)` | NO | UNIQUE(2) with group | |
-| `value` | `JSON` | YES | | |
-| `updated_by` | `BIGINT UNSIGNED` | YES | FK → `users.id` | ON DELETE SET NULL |
-| `created_at` / `updated_at` | `TIMESTAMP` | YES | | |
-
-Covers FR-10 ("manage public website content without modifying source code") — e.g. homepage hero text, initiative page copy, competition rules text.
 
 ---
 
@@ -554,7 +519,7 @@ Covers FR-10 ("manage public website content without modifying source code") —
 - **Permissions (19, from backend.md §4.3):** `participant.vote`, `participant.comment`, `participant.view_results`, `article.create`, `article.submit`, `article.update_own`, `article.publish_own`, `article.review`, `article.publish_any`, `article.unpublish`, `article.feature`, `comment.moderate`, `content.manage`, `user.manage`, `publisher.manage`, `analytics.view_own`, `analytics.view_all`, `settings.manage`, `audit.view`
 - **Role → permission mapping:**
   - `participant` → the three `participant.*` permissions
-  - `publisher` → `article.create`, `article.submit`, `article.update_own`, `article.publish_own`*, `analytics.view_own` (*direct publishing still gated by `publisher_permissions.can_publish_directly`*)
+  - `publisher` → `article.create`, `article.update_own`, `article.publish_own`, `analytics.view_own`
   - `administrator` → all permissions
 - **Universities:** approved lookup list for the inter-university competition (decision D1) — managed via a controlled seeder, never typed free-form by users.
 - **Initial administrator account** (created via seeder, credentials from secrets — never committed).
@@ -739,14 +704,6 @@ erDiagram
         varchar mime_type
         bigint size_bytes
     }
-    API_KEYS {
-        bigint id PK
-        varchar public_id UK
-        char secret_hash
-        json scopes
-        timestamp expires_at
-        timestamp revoked_at
-    }
     AUDIT_LOGS {
         bigint id PK
         bigint actor_id FK
@@ -756,13 +713,6 @@ erDiagram
         json metadata
         char ip_hash
         timestamp created_at
-    }
-    PLATFORM_SETTINGS {
-        bigint id PK
-        varchar setting_group
-        varchar setting_key
-        json value
-        bigint updated_by FK
     }
 
     USERS ||--o{ ROLE_USER : "assigned"
@@ -790,7 +740,6 @@ erDiagram
     USERS |o--o{ COMMENT_MODERATION_RECORDS : "acted-by"
     WORKSHOPS ||--o{ WORKSHOP_RESOURCES : "provides"
     MAGAZINE_PUBLICATIONS ||--o{ E_MAGAZINE_FILES : "contains"
-    USERS |o--o{ API_KEYS : "created-by"
     USERS |o--o{ AUDIT_LOGS : "actor"
     USERS |o--o{ VOTING_PERIODS : "created-by"
     USERS ||--o{ PASSWORD_RESET_TOKENS : "resets"
@@ -806,7 +755,7 @@ erDiagram
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Participant profile fields | Added **directly to `users`**: `university_id` (nullable FK to a new **`universities` lookup table** — prevents spelling mismatches), `faculty`, `phone`. A separate profile table is deferred unless profile fields exceed 6–7. |
-| D2 | `platform_settings` | **Included** — supports FR-10 dashboard-managed content/configuration. |
+| D2 | `platform_settings` & `api_keys` | **Excluded** — Platform configuration is managed statically/via `.env` variables and frontend configuration; API keys and integrations module are excluded as all interactions are user-facing via browser sessions. |
 | D3 | Comment moderation policy | **Post-moderation** — comments are visible immediately on submission; administrators remove afterwards. The `pending` status was removed from the comment status set. |
 | D4 | Status column typing | **Laravel-idiomatic `VARCHAR` + request validation** instead of native MySQL `ENUM`. Allowed values are documented per table; optional `CHECK` constraints can be added at migration time if desired. |
 | — | Defaults kept (not raised) | ULID public IDs on `users` + `articles` only · workshop speakers as JSON · attachment kinds `image/document/other` · `article_vote_summaries` cache kept · CMS status set `draft/published/archived`. |
@@ -816,7 +765,7 @@ erDiagram
 ## 10. Next Steps
 
 1. ~~Confirm/answer the open questions~~ — done (§9); schema v1.1 is ready to implement.
-2. Create the Laravel project and convert each §4 table block into module-prefixed migrations (Identity → Content → Articles → Voting → Comments → Audit → Integrations order, per backend.md §11).
+2. Create the Laravel project and convert each §4 table block into module-prefixed migrations (Identity → Articles → Voting → Comments → Audit order, per backend.md §10).
 3. Generate seeders for roles/permissions/initial admin.
 4. Export the ERD to SVG/PNG for the SRS documentation pack.
 5. Write the vote-concurrency feature test early to prove the `UNIQUE (user_id, article_id)` constraint (backend.md §10.2).

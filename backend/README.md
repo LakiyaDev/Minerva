@@ -8,13 +8,16 @@ This repository currently implements the **Identity & Access Management (IAM)**,
 password + TOTP authentication, RBAC, publisher grants, invitations, session
 control and audit logging; the public article catalogue, publisher workspace,
 and editorial review queue; and transaction-safe voting with configurable
-windows, live participant results, and Reverb broadcasting. Later modules (`Comments`, `Analytics`, `Integrations`, `Audit`) plug into the
+windows, live participant results, and Reverb broadcasting. Later modules (`Comments`, `Analytics`, `Audit`) plug into the
 same module structure. Static informational website content (workshops,
 timeline, sponsors, committee, and magazine pages) is maintained directly in
-the frontend with no backend CMS module required.
+the frontend; platform configuration is managed via `.env` variables and
+frontend config without a backend CMS, platform settings, or API-keys module.
 
 - API base path: `/api/v1`
 - Architecture: `docs/identity-and-access.md`, `docs/articles-and-editorial.md`, `docs/voting.md`
+- Schema plan (what was created and why): `docs/database-implementation-plan.md`
+- Schema verifier: `scripts/verify-schema.php` · database bootstrap: `scripts/create-database.sh`
 - API contract: `openapi/openapi.yaml`
 - Requirements source: `Docs/` on the `main` branch (SRS v1.1, backend guide)
 
@@ -45,17 +48,28 @@ composer install
 cp .env.example .env
 php artisan key:generate
 
-# Create the database and its user first (MySQL 8):
-#   CREATE DATABASE minerva CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-#   CREATE USER 'minerva'@'127.0.0.1' IDENTIFIED BY 'minerva-dev';
-#   GRANT ALL PRIVILEGES ON minerva.* TO 'minerva'@'127.0.0.1';
+# One command: creates the database + least-privilege user, migrates, seeds
+# the reference data, then verifies the schema against Docs/database-schema.md.
+./scripts/create-database.sh
 
-php artisan migrate --seed
+# Reset a dev database from scratch (drops the schema):
+./scripts/create-database.sh --fresh
+
+# Verify the schema on its own (MySQL, MariaDB or SQLite):
+php scripts/verify-schema.php
+
 php artisan identity:create-admin admin@example.com
 
 php artisan serve            # http://localhost:8000
 php artisan queue:work       # in another terminal
 ```
+
+`scripts/create-database.sh` reads the target database and application user
+from `DB_*` in `.env`; the privileged connection it uses comes from
+`--admin-user` / `--admin-password` / `--socket` (default: `root` over the
+unix socket). On a machine without a MySQL server the tests still run on
+SQLite (`phpunit.xml` forces `:memory:`), and the schema verifies there too —
+CHECK constraints are the only thing MySQL/MariaDB adds and SQLite skips.
 
 Set `DB_PASSWORD` in `.env` to the password of the database user you created.
 

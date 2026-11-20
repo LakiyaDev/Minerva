@@ -32,9 +32,19 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { activity, articleStatusLabels, participants, type Article, type ArticleStatus } from "../data";
+import { activity, articleStatusLabels, type Article, type ArticleStatus } from "../data";
 import { useApp, type EditorialResult } from "../store";
 import { ApiError, ApiUnavailableError } from "../services/apiClient";
+import {
+  getAdminUsers,
+  getStaffInvitations,
+  grantPublisherPermission,
+  inviteStaffMember,
+  revokePublisherPermission,
+  updateAdminUser,
+  type AdminUserDto,
+  type StaffInvitationDto,
+} from "../services/userService";
 import {
   activateAdminVotingPeriod,
   createAdminVotingPeriod,
@@ -50,6 +60,16 @@ import {
   type CommentDto,
   type CommentStatus,
 } from "../services/commentService";
+import {
+  getAdminAnalytics,
+  type AdminAnalyticsDto,
+} from "../services/analyticsService";
+import {
+  getAdminAuditLogs,
+  type AuditLogDto,
+  type PaginatedAuditLogs,
+} from "../services/auditService";
+import { subscribeVotingResults } from "../services/echoService";
 
 function toDateTimeLocal(iso?: string): string {
   if (!iso) return "";
@@ -74,6 +94,8 @@ function formatDateTime(iso: string): string {
 export function AdminOverview() {
   const { articles, votingStatus } = useApp();
   const [statistics, setStatistics] = useState<VotingStatisticsDto | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalyticsDto | null>(null);
+  const [recentLogs, setRecentLogs] = useState<AuditLogDto[]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,36 +106,86 @@ export function AdminOverview() {
       .catch(() => {
         // Keep fallback summary cards if API is unreachable or unauthorized.
       });
+
+    getAdminAnalytics(controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setAnalytics(data);
+      })
+      .catch(() => {
+        // Keep fallback if analytics API is unavailable.
+      });
+
+    getAdminAuditLogs({ per_page: 5 }, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setRecentLogs(data.data);
+      })
+      .catch(() => {
+        // Keep empty logs if unauthorized or unreachable.
+      });
+
     return () => controller.abort();
   }, []);
 
   const published = articles.filter((a) => a.status === "published");
-  const votes = statistics?.total_votes ?? articles.reduce((s, a) => s + a.votes, 0);
-  const chart = statistics
-    ? statistics.top_articles.slice(0, 6).map((a) => ({
-        name: a.title.slice(0, 16) + (a.title.length > 16 ? "…" : ""),
-        votes: a.vote_count,
-      }))
-    : [...published]
-        .sort((a, b) => b.votes - a.votes)
-        .slice(0, 6)
-        .map((a) => ({ name: a.title.slice(0, 16) + "…", votes: a.votes }));
+  const votes =
+    analytics?.voting.total_votes ??
+    statistics?.total_votes ??
+    articles.reduce((s, a) => s + a.votes, 0);
 
-  const windowIsOpen = statistics?.active_period?.is_open ?? votingStatus?.is_open ?? false;
+  const chart = analytics?.top_performing_articles?.length
+    ? analytics.top_performing_articles.slice(0, 6).map((a) => ({
+        name: a.title.slice(0, 16) + (a.title.length > 16 ? "…" : ""),
+        votes: a.votes_count,
+      }))
+    : statistics
+      ? statistics.top_articles.slice(0, 6).map((a) => ({
+          name: a.title.slice(0, 16) + (a.title.length > 16 ? "…" : ""),
+          votes: a.vote_count,
+        }))
+      : [...published]
+          .sort((a, b) => b.votes - a.votes)
+          .slice(0, 6)
+          .map((a) => ({ name: a.title.slice(0, 16) + "…", votes: a.votes }));
+
+  const windowIsOpen =
+    analytics?.voting.active_period?.is_active ??
+    statistics?.active_period?.is_open ??
+    votingStatus?.is_open ??
+    false;
+
+  const trendData = analytics?.voting.daily_trend?.length
+    ? analytics.voting.daily_trend.map((point) => ({
+        day: point.label,
+        votes: point.votes,
+      }))
+    : (statistics?.daily_activity ?? activity);
+
   const stats: Array<[LucideIcon, string | number, string, string]> = [
-    [UsersRound, statistics?.unique_voters ?? 0, "unique voters", "Registered ballots"],
+    [
+      UsersRound,
+      analytics?.voting.unique_voters ?? statistics?.unique_voters ?? 0,
+      "unique voters",
+      "Registered ballots",
+    ],
     [
       FileText,
-      statistics?.published_articles_count ?? published.length,
+      analytics?.articles_summary.by_status.published ??
+        statistics?.published_articles_count ??
+        published.length,
       "published articles",
-      "Competition entries",
+      analytics?.articles_summary.total
+        ? `${analytics.articles_summary.total} total in repository`
+        : "Competition entries",
     ],
     [Vote, votes.toLocaleString(), "total votes", "Final recorded votes"],
     [
       ToggleLeft,
       windowIsOpen ? "Open" : "Closed",
       "ballot window",
-      statistics?.active_period?.name ?? votingStatus?.period?.name ?? "No active period",
+      analytics?.voting.active_period?.name ??
+        statistics?.active_period?.name ??
+        votingStatus?.period?.name ??
+        "No active period",
     ],
   ];
   return (
@@ -137,6 +209,92 @@ export function AdminOverview() {
           </div>
         ))}
       </div>
+
+      {analytics && (
+        <div
+          className="admin-analytics-summary"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: "1rem",
+            marginBottom: "1.5rem",
+            padding: "1rem 1.25rem",
+            background: "#faf8f5",
+            border: "1px solid #e4dcc9",
+            borderRadius: "6px",
+          }}
+        >
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Unpublished / Removed
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.articles_summary.by_status.unpublished ?? 0}
+            </strong>
+          </div>
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Drafts / In Progress
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.articles_summary.by_status.draft ?? 0}
+            </strong>
+          </div>
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Community Comments
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.community.total_comments}
+            </strong>
+          </div>
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Moderation Rate
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.community.moderation_rate_percent}%
+            </strong>
+          </div>
+        </div>
+      )}
+
       <div className="charts-grid">
         <section>
           <header>
@@ -145,11 +303,11 @@ export function AdminOverview() {
               <h2>Votes over time</h2>
             </div>
             <select>
-              <option>Last 6 weeks</option>
+              <option>Last 14 days</option>
             </select>
           </header>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={statistics?.daily_activity ?? activity}>
+            <AreaChart data={trendData}>
               <defs>
                 <linearGradient id="bronze" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#8A6D3B" stopOpacity=".35" />
@@ -188,11 +346,63 @@ export function AdminOverview() {
         </section>
       </div>
       <section className="admin-activity">
-        <header>
-          <span className="eyebrow">recent activity.</span>
-          <h2>What changed today</h2>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <span className="eyebrow">recent activity.</span>
+            <h2>What changed today</h2>
+          </div>
+          <Link
+            to="/admin/audit-logs"
+            className="btn outline"
+            style={{ fontSize: "0.82rem", padding: "0.35rem 0.75rem" }}
+          >
+            view audit trail →
+          </Link>
         </header>
-        <p className="empty-state-copy">No recent activity.</p>
+        {recentLogs.length > 0 ? (
+          <div style={{ display: "grid", gap: "0.6rem", marginTop: "1rem" }}>
+            {recentLogs.map((log) => (
+              <div
+                key={log.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "0.75rem 1rem",
+                  background: "#fff",
+                  border: "1px solid #e4dcc9",
+                  borderRadius: "6px",
+                  fontSize: "0.88rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                  <code
+                    style={{
+                      fontSize: "0.78rem",
+                      background: "rgba(138,109,59,0.1)",
+                      color: "#8a6d3b",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    {log.action}
+                  </code>
+                  <span>
+                    {log.actor?.name ? <strong>{log.actor.name}</strong> : <span style={{ opacity: 0.6 }}>System</span>}
+                    {log.subject_type && (
+                      <span style={{ opacity: 0.7, marginLeft: "0.4rem" }}>
+                        · {log.subject_type.split("\\").pop()} {log.subject_id ? `#${log.subject_id.slice(0, 8)}` : ""}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <small style={{ color: "#6b705c" }}>{formatDateTime(log.created_at)}</small>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state-copy">No recent platform activity recorded.</p>
+        )}
       </section>
     </div>
   );
@@ -219,7 +429,7 @@ function PageHead({
 }
 
 export function AdminArticles() {
-  const { categories, loadAdminArticles, approve, reject, publishAny, unpublish, toggleFeatured } =
+  const { categories, loadAdminArticles, publishAny, unpublish, toggleFeatured } =
     useApp();
   const [rows, setRows] = useState<Article[]>([]);
   const [search, setSearch] = useState("");
@@ -228,8 +438,6 @@ export function AdminArticles() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [rejecting, setRejecting] = useState<Article | null>(null);
-  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const location = useLocation();
 
@@ -349,7 +557,7 @@ export function AdminArticles() {
           <span>Actions</span>
         </div>
         {loading ? (
-          <p className="empty-state-copy">Loading the editorial queue…</p>
+          <p className="empty-state-copy">Loading articles…</p>
         ) : visible.length === 0 ? (
           <p className="empty-state-copy">No articles match these filters.</p>
         ) : (
@@ -367,30 +575,7 @@ export function AdminArticles() {
               <strong>{a.votes}</strong>
               <span className={`status ${a.status}`}>{articleStatusLabels[a.status]}</span>
               <div className="row-actions">
-                {a.status === "pending_review" && (
-                  <>
-                    <button
-                      aria-label="Approve"
-                      title="Approve"
-                      disabled={busy === a.id}
-                      onClick={() => act(a.id, () => approve(a.id), "Article approved.")}
-                    >
-                      <Check />
-                    </button>
-                    <button
-                      aria-label="Reject"
-                      title="Reject"
-                      disabled={busy === a.id}
-                      onClick={() => {
-                        setRejecting(a);
-                        setReason("");
-                      }}
-                    >
-                      <X />
-                    </button>
-                  </>
-                )}
-                {(a.status === "approved" || a.status === "draft" || a.status === "unpublished") && (
+                {(a.status === "draft" || a.status === "unpublished") && (
                   <button
                     aria-label="Publish"
                     title="Publish"
@@ -402,8 +587,8 @@ export function AdminArticles() {
                 )}
                 {a.status === "published" && (
                   <button
-                    aria-label="Unpublish"
-                    title="Unpublish"
+                    aria-label="Unpublish / Remove"
+                    title="Unpublish / Remove"
                     disabled={busy === a.id}
                     onClick={() => act(a.id, () => unpublish(a.id), "Article unpublished.")}
                   >
@@ -432,42 +617,6 @@ export function AdminArticles() {
           ))
         )}
       </div>
-      {rejecting && (
-        <div className="modal-backdrop">
-          <div className="confirm-modal">
-            <button className="modal-close" onClick={() => setRejecting(null)}>
-              <X />
-            </button>
-            <span className="eyebrow">editorial feedback.</span>
-            <h2>Send “{rejecting.title}” back?</h2>
-            <p>The publisher sees this reason on the rejected article.</p>
-            <label className="editor-form">
-              <textarea
-                rows={4}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Explain what needs to change before resubmission."
-              />
-            </label>
-            <div>
-              <button className="btn outline" onClick={() => setRejecting(null)}>
-                cancel
-              </button>
-              <button
-                className="btn"
-                disabled={reason.trim().length < 5 || busy === rejecting.id}
-                onClick={async () => {
-                  const target = rejecting;
-                  setRejecting(null);
-                  await act(target.id, () => reject(target.id, reason.trim()), "Article rejected.");
-                }}
-              >
-                reject article
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -916,21 +1065,28 @@ export function VotingManagement() {
 export function Results() {
   const { articles } = useApp();
   const [statistics, setStatistics] = useState<VotingStatisticsDto | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalyticsDto | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
 
     const loadStats = () => {
-      getAdminVotingStatistics(controller.signal)
-        .then((data) => {
-          if (!controller.signal.aborted) {
-            setStatistics(data);
-            setError(null);
-          }
-        })
-        .catch((err) => {
-          if (controller.signal.aborted) return;
+      Promise.allSettled([
+        getAdminVotingStatistics(controller.signal),
+        getAdminAnalytics(controller.signal),
+      ]).then(([votingRes, analyticsRes]) => {
+        if (controller.signal.aborted) return;
+        if (votingRes.status === "fulfilled") {
+          setStatistics(votingRes.value);
+          setError(null);
+        }
+        if (analyticsRes.status === "fulfilled") {
+          setAnalytics(analyticsRes.value);
+          setError(null);
+        }
+        if (votingRes.status === "rejected" && analyticsRes.status === "rejected") {
+          const err = votingRes.reason;
           setError(
             err instanceof ApiUnavailableError
               ? "The MINERVA API is unreachable."
@@ -938,7 +1094,8 @@ export function Results() {
                 ? err.message
                 : "Unable to load voting statistics.",
           );
-        });
+        }
+      });
     };
 
     loadStats();
@@ -950,30 +1107,100 @@ export function Results() {
     };
   }, []);
 
+  // Real-time WebSocket updates via Laravel Reverb: instant tally updates
+  useEffect(() => {
+    const periodId = statistics?.active_period?.id || analytics?.voting.active_period?.id;
+    if (!periodId) return;
+
+    const unsubscribe = subscribeVotingResults(periodId, (payload) => {
+      setStatistics((prev) => {
+        if (!prev) return prev;
+        const updatedArticles = prev.top_articles
+          .map((item) =>
+            item.article_id === payload.article_id
+              ? { ...item, vote_count: payload.vote_count }
+              : item,
+          )
+          .sort((a, b) => b.vote_count - a.vote_count);
+        return {
+          ...prev,
+          total_votes: prev.total_votes + 1,
+          top_articles: updatedArticles,
+        };
+      });
+
+      setAnalytics((prev) => {
+        if (!prev) return prev;
+        const updatedArticles = prev.top_performing_articles
+          .map((item) =>
+            item.id === payload.article_id
+              ? { ...item, votes_count: payload.vote_count }
+              : item,
+          )
+          .sort((a, b) => b.votes_count - a.votes_count);
+        return {
+          ...prev,
+          voting: {
+            ...prev.voting,
+            total_votes: prev.voting.total_votes + 1,
+          },
+          top_performing_articles: updatedArticles,
+        };
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [statistics?.active_period?.id, analytics?.voting.active_period?.id]);
+
   const fallbackSorted = [...articles]
     .filter((a) => a.status === "published")
     .sort((a, b) => b.votes - a.votes);
 
-  const rows = statistics
-    ? statistics.top_articles.map((entry) => ({
-        id: entry.article_id,
+  const rows = analytics?.top_performing_articles?.length
+    ? analytics.top_performing_articles.map((entry) => ({
+        id: entry.id,
         title: entry.title,
         category: entry.category?.name ?? "Uncategorized",
-        votes: entry.vote_count,
+        votes: entry.votes_count,
       }))
-    : fallbackSorted.map((a) => ({
-        id: a.id,
-        title: a.title,
-        category: a.category,
-        votes: a.votes,
-      }));
+    : statistics
+      ? statistics.top_articles.map((entry) => ({
+          id: entry.article_id,
+          title: entry.title,
+          category: entry.category?.name ?? "Uncategorized",
+          votes: entry.vote_count,
+        }))
+      : fallbackSorted.map((a) => ({
+          id: a.id,
+          title: a.title,
+          category: a.category,
+          votes: a.votes,
+        }));
 
-  const total = statistics?.total_votes ?? rows.reduce((s, a) => s + a.votes, 0);
-  const uniqueVoters = statistics?.unique_voters ?? 0;
-  const publishedCount = statistics?.published_articles_count ?? fallbackSorted.length;
-  const pie = (statistics?.by_category ?? [])
-    .filter((item) => item.votes > 0)
-    .map((item) => ({ name: item.name, value: item.votes }));
+  const total =
+    analytics?.voting.total_votes ??
+    statistics?.total_votes ??
+    rows.reduce((s, a) => s + a.votes, 0);
+
+  const uniqueVoters =
+    analytics?.voting.unique_voters ??
+    statistics?.unique_voters ??
+    0;
+
+  const publishedCount =
+    analytics?.articles_summary.by_status.published ??
+    statistics?.published_articles_count ??
+    fallbackSorted.length;
+
+  const pie = analytics?.categories?.length
+    ? analytics.categories
+        .filter((item) => item.votes_count > 0)
+        .map((item) => ({ name: item.name, value: item.votes_count }))
+    : (statistics?.by_category ?? [])
+        .filter((item) => item.votes > 0)
+        .map((item) => ({ name: item.name, value: item.votes }));
   const pieColors = ["#8A6D3B", "#2E2A21", "#C9A227", "#6B705C", "#A58A5B"];
 
   return (
@@ -1065,67 +1292,464 @@ export function Results() {
 }
 
 export function Participants() {
-  const [inactive, setInactive] = useState<string[]>([]);
+  const { user: currentUser, hasPermission } = useApp();
+  const canManagePublishers = hasPermission("publisher.manage");
+  const canInviteStaff = hasPermission("user.manage");
+
+  const [users, setUsers] = useState<AdminUserDto[]>([]);
+  const [invitations, setInvitations] = useState<StaffInvitationDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const [lastPage, setLastPage] = useState(1);
+  const [totalUsers, setTotalUsers] = useState(0);
+
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [showInvitations, setShowInvitations] = useState(false);
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"publisher" | "administrator">("publisher");
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const loadUsers = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await getAdminUsers(
+          {
+            q: debouncedSearch,
+            role: roleFilter,
+            is_active: statusFilter,
+            page,
+            per_page: 20,
+          },
+          signal,
+        );
+        if (signal?.aborted) return;
+        setUsers(res.data);
+        setLastPage(res.meta?.last_page ?? 1);
+        setTotalUsers(res.meta?.total ?? res.data.length);
+      } catch (err) {
+        if (signal?.aborted) return;
+        setError(
+          err instanceof ApiUnavailableError
+            ? "The MINERVA API is unreachable."
+            : err instanceof ApiError
+              ? err.message
+              : "Unable to load users.",
+        );
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [debouncedSearch, roleFilter, statusFilter, page],
+  );
+
+  const loadInvitations = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await getStaffInvitations(signal);
+      if (signal?.aborted) return;
+      setInvitations(res.data);
+    } catch {
+      // Non-critical secondary list
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadUsers(controller.signal);
+    void loadInvitations(controller.signal);
+    return () => controller.abort();
+  }, [loadUsers, loadInvitations]);
+
+  const handleToggleActive = async (target: AdminUserDto) => {
+    if (
+      target.is_active &&
+      !window.confirm(`Deactivate "${target.name}" (${target.email})? They will be signed out.`)
+    ) {
+      return;
+    }
+
+    setBusyId(target.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await updateAdminUser(target.id, { is_active: !target.is_active });
+      setNotice(
+        target.is_active
+          ? `${target.name} has been deactivated.`
+          : `${target.name} has been reactivated.`,
+      );
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update user status.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleGrantPublisher = async (target: AdminUserDto) => {
+    setBusyId(target.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await grantPublisherPermission(target.id);
+      setNotice(`Publisher access granted to ${target.name}.`);
+      await loadUsers();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError(
+          `${err.message} Click "Invite staff" to send ${target.email} a staff onboarding invitation.`,
+        );
+      } else {
+        setError(err instanceof Error ? err.message : "Unable to grant publisher access.");
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRevokePublisher = async (target: AdminUserDto) => {
+    if (!window.confirm(`Revoke publisher access from "${target.name}"?`)) {
+      return;
+    }
+
+    setBusyId(target.id);
+    setError(null);
+    setNotice(null);
+    try {
+      await revokePublisherPermission(target.id);
+      setNotice(`Publisher access revoked from ${target.name}.`);
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to revoke publisher access.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleInviteSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setInviting(true);
+    setInviteError(null);
+    try {
+      await inviteStaffMember(inviteEmail.trim(), inviteRole);
+      setInviteOpen(false);
+      setInviteEmail("");
+      setNotice(`Staff invitation sent to ${inviteEmail.trim()} (${inviteRole}).`);
+      await loadInvitations();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setInviteError(err.fieldError("email") || err.fieldError("role") || err.message);
+      } else {
+        setInviteError(err instanceof Error ? err.message : "Unable to send staff invitation.");
+      }
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const pendingInvitations = invitations.filter((inv) => !inv.accepted_at);
+
   return (
     <div className="admin-page">
-      <PageHead eyebrow="community." title="Participant management." />
+      <PageHead
+        eyebrow="community & access."
+        title="User & publisher management."
+        action={
+          canInviteStaff ? (
+            <button
+              className="btn"
+              type="button"
+              onClick={() => {
+                setInviteError(null);
+                setInviteOpen(true);
+              }}
+            >
+              <Plus /> invite staff
+            </button>
+          ) : undefined
+        }
+      />
+
+      {notice && (
+        <div className="notice-banner" role="status">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notice">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)} aria-label="Dismiss error">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="table-tools">
         <label>
           <Search />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search participants"
+            placeholder="Search by name or email"
           />
         </label>
+        <select
+          value={roleFilter}
+          onChange={(e) => {
+            setRoleFilter(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by role"
+        >
+          <option value="">All roles</option>
+          <option value="participant">Participant</option>
+          <option value="publisher">Publisher</option>
+          <option value="administrator">Administrator</option>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by status"
+        >
+          <option value="">All statuses</option>
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+        {pendingInvitations.length > 0 && (
+          <button
+            type="button"
+            className="btn outline"
+            onClick={() => setShowInvitations((v) => !v)}
+          >
+            {showInvitations
+              ? "Hide invitations"
+              : `Pending invitations (${pendingInvitations.length})`}
+          </button>
+        )}
       </div>
-      <div className="data-table participant-table">
-        <div className="table-head">
-          <span>Participant</span>
-          <span>Faculty</span>
-          <span>Votes</span>
-          <span>Status</span>
-          <span>Action</span>
-        </div>
-        {participants
-          .filter((p) => p[0].toString().toLowerCase().includes(search.toLowerCase()))
-          .map((p) => (
-            <div className="table-row" key={p[0]}>
-              <div className="participant-name">
-                <span>
-                  {p[0]
-                    .toString()
-                    .split(" ")
-                    .map((n) => n[0])
-                    .slice(0, 2)
-                    .join("")}
-                </span>
-                <div>
-                  <strong>{p[0]}</strong>
-                  <small>{p[1]}</small>
-                </div>
-              </div>
-              <span>{p[2]}</span>
-              <strong>{p[3]}</strong>
-              <span className={`status ${inactive.includes(p[0] as string) ? "closed" : "open"}`}>
-                {inactive.includes(p[0] as string) ? "inactive" : "active"}
-              </span>
-              <button
-                className="text-button"
-                onClick={() =>
-                  setInactive((c) =>
-                    c.includes(p[0] as string)
-                      ? c.filter((n) => n !== p[0])
-                      : [...c, p[0] as string],
-                  )
-                }
-              >
-                {inactive.includes(p[0] as string) ? "Activate" : "Deactivate"}
-              </button>
+
+      {showInvitations && pendingInvitations.length > 0 && (
+        <div
+          className="data-table"
+          style={{ marginBottom: "1.5rem", border: "1px solid rgba(201, 162, 39, 0.3)" }}
+        >
+          <div className="table-head">
+            <span>Invited Email</span>
+            <span>Role</span>
+            <span>Invited By</span>
+            <span>Expires</span>
+          </div>
+          {pendingInvitations.map((inv) => (
+            <div className="table-row" key={inv.id}>
+              <strong>{inv.email}</strong>
+              <span className="status">{inv.role}</span>
+              <span>{inv.invited_by ?? "System"}</span>
+              <span>{inv.expires_at ? formatDateTime(inv.expires_at) : "—"}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      <div className="data-table participant-table">
+        <div className="table-head">
+          <span>User ({totalUsers})</span>
+          <span>Roles</span>
+          <span>Last Login</span>
+          <span>Status</span>
+          <span>Actions</span>
+        </div>
+        {loading ? (
+          <p className="empty-state-copy">Loading users…</p>
+        ) : users.length === 0 ? (
+          <p className="empty-state-copy">No users match these filters.</p>
+        ) : (
+          users.map((u) => {
+            const initials = u.name
+              .split(" ")
+              .map((n) => n[0])
+              .slice(0, 2)
+              .join("")
+              .toUpperCase();
+            const isSelf = currentUser?.id === u.id;
+            const isPublisher = u.roles.includes("publisher");
+            const isAdmin = u.roles.includes("administrator");
+
+            return (
+              <div className="table-row" key={u.id}>
+                <div className="participant-name">
+                  <span>{initials || "U"}</span>
+                  <div>
+                    <strong>{u.name}</strong>
+                    <small>{u.email}</small>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  {u.roles.map((r) => (
+                    <span className="status" key={r}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+                <span>{u.last_login_at ? formatDateTime(u.last_login_at) : "Never"}</span>
+                <span className={`status ${u.is_active ? "open" : "closed"}`}>
+                  {u.is_active ? "active" : "inactive"}
+                </span>
+                <div className="row-actions" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                  {canManagePublishers && !isAdmin && (
+                    isPublisher ? (
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={busyId === u.id}
+                        onClick={() => void handleRevokePublisher(u)}
+                      >
+                        Revoke publisher
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={busyId === u.id}
+                        onClick={() => void handleGrantPublisher(u)}
+                      >
+                        Grant publisher
+                      </button>
+                    )
+                  )}
+                  {!isSelf && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={busyId === u.id}
+                      onClick={() => void handleToggleActive(u)}
+                    >
+                      {u.is_active ? "Deactivate" : "Activate"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
+
+      {lastPage > 1 && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "1rem",
+          }}
+        >
+          <button
+            type="button"
+            className="btn outline"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Previous
+          </button>
+          <small>
+            Page {page} of {lastPage}
+          </small>
+          <button
+            type="button"
+            className="btn outline"
+            disabled={page >= lastPage}
+            onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {inviteOpen && (
+        <div className="modal-backdrop">
+          <div className="confirm-modal">
+            <button
+              className="modal-close"
+              type="button"
+              onClick={() => setInviteOpen(false)}
+              aria-label="Close"
+            >
+              <X />
+            </button>
+            <span className="eyebrow">staff onboarding.</span>
+            <h2>Invite a staff member</h2>
+            <p>
+              Send an onboarding invitation to grant publisher or administrator access.
+            </p>
+            {inviteError && (
+              <div className="error-banner" role="alert" style={{ marginBottom: "1rem" }}>
+                <span>{inviteError}</span>
+              </div>
+            )}
+            <form className="editor-form" onSubmit={(e) => void handleInviteSubmit(e)}>
+              <label>
+                Email address
+                <input
+                  type="email"
+                  required
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="staff@example.com"
+                  disabled={inviting}
+                />
+              </label>
+              <label>
+                Assigned role
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "publisher" | "administrator")}
+                  disabled={inviting}
+                >
+                  <option value="publisher">Publisher (can create &amp; publish articles)</option>
+                  <option value="administrator">Administrator (full platform governance)</option>
+                </select>
+              </label>
+              <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn outline"
+                  onClick={() => setInviteOpen(false)}
+                  disabled={inviting}
+                >
+                  cancel
+                </button>
+                <button type="submit" className="btn" disabled={inviting}>
+                  {inviting ? "sending…" : "send invitation"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1392,6 +2016,357 @@ export function AdminComments() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AdminAuditLogs() {
+  const [logs, setLogs] = useState<AuditLogDto[]>([]);
+  const [meta, setMeta] = useState<PaginatedAuditLogs["meta"]>({
+    current_page: 1,
+    per_page: 25,
+    total: 0,
+  });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [actionCategory, setActionCategory] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [inspectingLog, setInspectingLog] = useState<AuditLogDto | null>(null);
+
+  const fetchLogs = useCallback(
+    async (targetPage: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await getAdminAuditLogs({
+          page: targetPage,
+          per_page: 25,
+          search: search.trim() || undefined,
+          action: actionCategory ? `${actionCategory}*` : undefined,
+        });
+        setLogs(res.data);
+        setMeta(res.meta);
+      } catch (err) {
+        setLogs([]);
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : err instanceof ApiUnavailableError
+              ? "The MINERVA API is unreachable."
+              : "Unable to load audit logs.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [search, actionCategory],
+  );
+
+  useEffect(() => {
+    void fetchLogs(page);
+  }, [fetchLogs, page]);
+
+  const categories = [
+    { label: "All actions", value: "" },
+    { label: "Articles", value: "article." },
+    { label: "Comments", value: "comment." },
+    { label: "Voting", value: "voting." },
+    { label: "Auth & Identity", value: "identity." },
+  ];
+
+  return (
+    <div className="admin-page">
+      <PageHead
+        eyebrow="governance & accountability."
+        title="Audit trail."
+      />
+
+      <div
+        className="table-tools"
+        style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}
+      >
+        <label style={{ flex: "1 1 280px" }}>
+          <Search />
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search action, actor, or subject…"
+          />
+        </label>
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+          {categories.map((cat) => (
+            <button
+              key={cat.label}
+              type="button"
+              className={actionCategory === cat.value ? "btn" : "btn outline"}
+              style={{ fontSize: "0.82rem", padding: "0.35rem 0.75rem" }}
+              onClick={() => {
+                setActionCategory(cat.value);
+                setPage(1);
+              }}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <div className="error-banner" role="alert" style={{ margin: "1rem 0" }}>
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="data-table" style={{ marginTop: "1rem" }}>
+        <div
+          className="table-head"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "180px 220px 200px 180px 100px 1fr",
+            gap: "0.75rem",
+          }}
+        >
+          <span>Timestamp</span>
+          <span>Action</span>
+          <span>Actor</span>
+          <span>Subject</span>
+          <span>IP Hash</span>
+          <span style={{ textAlign: "right" }}>Inspect</span>
+        </div>
+
+        {loading ? (
+          <p className="empty-state-copy">Loading audit records…</p>
+        ) : logs.length === 0 ? (
+          <p className="empty-state-copy">No audit records match the selected filters.</p>
+        ) : (
+          logs.map((log) => (
+            <div
+              key={log.id}
+              className="table-row"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "180px 220px 200px 180px 100px 1fr",
+                gap: "0.75rem",
+                alignItems: "center",
+                padding: "0.85rem 1rem",
+              }}
+            >
+              <small style={{ color: "#6b705c" }}>{formatDateTime(log.created_at)}</small>
+              <div>
+                <code
+                  style={{
+                    fontSize: "0.78rem",
+                    background: "rgba(138, 109, 59, 0.12)",
+                    color: "#8a6d3b",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {log.action}
+                </code>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", fontSize: "0.85rem" }}>
+                <strong>{log.actor?.name || "System"}</strong>
+                {log.actor?.email && <small style={{ opacity: 0.7 }}>{log.actor.email}</small>}
+              </div>
+              <div style={{ fontSize: "0.82rem", opacity: 0.85 }}>
+                {log.subject_type ? (
+                  <span>
+                    {log.subject_type.split("\\").pop()}{" "}
+                    {log.subject_id ? `#${log.subject_id.slice(0, 8)}` : ""}
+                  </span>
+                ) : (
+                  <span style={{ opacity: 0.5 }}>—</span>
+                )}
+              </div>
+              <div>
+                {log.ip_hash ? (
+                  <code style={{ fontSize: "0.72rem", opacity: 0.7 }}>
+                    {log.ip_hash.slice(0, 8)}…
+                  </code>
+                ) : (
+                  <span style={{ opacity: 0.5 }}>—</span>
+                )}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="btn outline"
+                  style={{ fontSize: "0.78rem", padding: "0.25rem 0.6rem" }}
+                  onClick={() => setInspectingLog(log)}
+                >
+                  <Eye size={13} /> view
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {meta.total > meta.per_page && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "1.5rem",
+          }}
+        >
+          <span style={{ fontSize: "0.85rem", opacity: 0.75 }}>
+            Showing page {meta.current_page} of {Math.ceil(meta.total / meta.per_page)} (
+            {meta.total} total events)
+          </span>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn outline"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              previous
+            </button>
+            <button
+              type="button"
+              className="btn outline"
+              disabled={page >= Math.ceil(meta.total / meta.per_page) || loading}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {inspectingLog && (
+        <div className="modal-backdrop" onClick={() => setInspectingLog(null)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: "650px", width: "90%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "1rem",
+              }}
+            >
+              <div>
+                <span className="eyebrow">audit record.</span>
+                <h2>Event inspection</h2>
+              </div>
+              <button
+                type="button"
+                className="btn outline"
+                onClick={() => setInspectingLog(null)}
+              >
+                <X size={15} />
+              </button>
+            </header>
+
+            <div
+              style={{
+                display: "grid",
+                gap: "0.75rem",
+                fontSize: "0.88rem",
+                marginBottom: "1.2rem",
+              }}
+            >
+              <div>
+                <small
+                  style={{
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    opacity: 0.7,
+                  }}
+                >
+                  Action
+                </small>
+                <div>
+                  <strong>{inspectingLog.action}</strong>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <small
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      opacity: 0.7,
+                    }}
+                  >
+                    Actor
+                  </small>
+                  <div>
+                    {inspectingLog.actor?.name ?? "System"} (
+                    {inspectingLog.actor?.email ?? "system"})
+                  </div>
+                </div>
+                <div>
+                  <small
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      opacity: 0.7,
+                    }}
+                  >
+                    Recorded At
+                  </small>
+                  <div>{formatDateTime(inspectingLog.created_at)}</div>
+                </div>
+              </div>
+              {inspectingLog.subject_type && (
+                <div>
+                  <small
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      opacity: 0.7,
+                    }}
+                  >
+                    Subject
+                  </small>
+                  <div>
+                    <code>{inspectingLog.subject_type}</code> · ID:{" "}
+                    <code>{inspectingLog.subject_id}</code>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gap: "0.4rem" }}>
+              <small
+                style={{
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  opacity: 0.7,
+                }}
+              >
+                Metadata Payload
+              </small>
+              <pre
+                style={{
+                  background: "#1e1e1e",
+                  color: "#d4d4d4",
+                  padding: "1rem",
+                  borderRadius: "6px",
+                  fontSize: "0.8rem",
+                  overflowX: "auto",
+                  maxHeight: "260px",
+                }}
+              >
+                {JSON.stringify(inspectingLog.metadata, null, 2)}
+              </pre>
+            </div>
           </div>
         </div>
       )}

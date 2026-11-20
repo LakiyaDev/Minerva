@@ -116,6 +116,33 @@ export async function forgotStaffPassword(email: string): Promise<void> {
   });
 }
 
+export async function resetStaffPassword(payload: {
+  token: string;
+  email: string;
+  password: string;
+  password_confirmation: string;
+}): Promise<void> {
+  await apiRequest<{ message?: string }>("/auth/staff/reset-password", {
+    method: "POST",
+    body: payload,
+  });
+}
+
 export async function logoutSession(): Promise<void> {
   await apiRequest<{ message?: string }>("/auth/logout", { method: "POST" });
+}
+
+export async function updateProfileName(name: string): Promise<MeDto> {
+  const response = await apiRequest<{ data: MeDto }>("/me", {
+    method: "PATCH",
+    body: { name },
+  });
+  return response.data;
+}
+
+export async function revokeOtherSessions(): Promise<{ revoked_sessions: number }> {
+  const response = await apiRequest<{ data: { revoked_sessions: number } }>("/me/sessions", {
+    method: "DELETE",
+  });
+  return response.data;
 }

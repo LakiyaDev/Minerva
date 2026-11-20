@@ -39,13 +39,13 @@ final class StaffInvitationService
             throw IdentityException::roleNotAssignable($role);
         }
 
-        $existing = User::withTrashed()->where('email', $email)->first();
+        $existing = User::query()->where('email', $email)->first();
 
         // A reader account may be upgraded to staff (keeping the participant
         // role); a password-bearing or staff account must not be re-invited.
         if (
             $existing !== null
-            && ($existing->trashed() || $existing->hasPasswordCredential() || $existing->isStaff())
+            && ($existing->hasPasswordCredential() || $existing->isStaff())
         ) {
             throw IdentityException::conflict('An account already exists for this email address.');
         }
@@ -102,14 +102,14 @@ final class StaffInvitationService
                 throw IdentityException::invalidInvitation();
             }
 
-            $existing = User::withTrashed()
+            $existing = User::query()
                 ->where('email', $locked->email)
                 ->lockForUpdate()
                 ->first();
 
             if (
                 $existing !== null
-                && ($existing->trashed() || $existing->hasPasswordCredential() || $existing->isStaff())
+                && ($existing->hasPasswordCredential() || $existing->isStaff())
             ) {
                 throw IdentityException::conflict('An account already exists for this email address.');
             }

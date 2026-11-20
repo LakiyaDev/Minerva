@@ -7,9 +7,6 @@ namespace App\Modules\Articles\Enums;
 enum ArticleStatus: string
 {
     case Draft = 'draft';
-    case PendingReview = 'pending_review';
-    case Approved = 'approved';
-    case Rejected = 'rejected';
     case Published = 'published';
     case Unpublished = 'unpublished';
 
@@ -23,12 +20,7 @@ enum ArticleStatus: string
 
     public function isEditableByOwner(): bool
     {
-        return $this === self::Draft || $this === self::Rejected;
-    }
-
-    public function isPendingReview(): bool
-    {
-        return $this === self::PendingReview;
+        return $this === self::Draft;
     }
 
     public function isPublished(): bool
@@ -45,9 +37,6 @@ enum ArticleStatus: string
     {
         return match ($this) {
             self::Draft => 'Draft',
-            self::PendingReview => 'Pending Review',
-            self::Approved => 'Approved',
-            self::Rejected => 'Rejected',
             self::Published => 'Published',
             self::Unpublished => 'Unpublished',
         };

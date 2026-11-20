@@ -33,19 +33,22 @@ final class PublisherPermissionService
         }
 
         $grant = DB::transaction(function () use ($target, $canPublishDirectly, $actor): PublisherPermission {
-            // At most one active grant; revoke any previous one first.
-            PublisherPermission::query()
+            // One row per user, active or revoked (§4.1.8). Re-granting after
+            // revocation flips the existing row back to active instead of
+            // inserting a second one; the history is in `audit_logs`.
+            $grant = PublisherPermission::query()
                 ->where('user_id', $target->getKey())
-                ->whereNull('revoked_at')
                 ->lockForUpdate()
-                ->update(['revoked_at' => now()]);
+                ->first();
 
-            $grant = PublisherPermission::query()->create([
-                'user_id' => $target->getKey(),
+            $grant ??= new PublisherPermission(['user_id' => $target->getKey()]);
+
+            $grant->forceFill([
                 'can_publish_directly' => $canPublishDirectly,
                 'granted_by' => $actor->getKey(),
                 'granted_at' => now(),
-            ]);
+                'revoked_at' => null,
+            ])->save();
 
             $role = Role::query()->where('name', 'publisher')->firstOrFail();
 

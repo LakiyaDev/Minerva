@@ -122,7 +122,6 @@ final class RoleService
 
         $activeAdministrators = User::query()
             ->where('is_active', true)
-            ->whereNull('deleted_at')
             ->whereHas('roles', fn ($query) => $query->where('name', 'administrator'))
             ->count();
 

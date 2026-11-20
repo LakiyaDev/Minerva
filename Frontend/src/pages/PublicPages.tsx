@@ -30,6 +30,7 @@ import {
   type ArticleVoteResultDto,
   type LeaderboardEntryDto,
 } from "../services/votingService";
+import { subscribeVotingResults } from "../services/echoService";
 import { ApiError, ApiUnavailableError } from "../services/apiClient";
 
 const PAGE_SIZE = 12;
@@ -289,9 +290,21 @@ export function ArticleDetail() {
 
     const interval = votingStatus?.is_open ? window.setInterval(fetchResults, 20000) : undefined;
 
+    const periodId = votingStatus?.period?.id;
+    const unsubscribe = periodId
+      ? subscribeVotingResults(periodId, (payload) => {
+          if (payload.article_id === articleId) {
+            setLiveResult((prev) =>
+              prev ? { ...prev, vote_count: payload.vote_count } : prev,
+            );
+          }
+        })
+      : () => {};
+
     return () => {
       controller.abort();
       if (interval !== undefined) window.clearInterval(interval);
+      unsubscribe();
     };
   }, [role, article?.id, votingStatus?.is_open]);
 
@@ -619,11 +632,28 @@ export function Leaderboard() {
       ? window.setInterval(() => loadBoard(false), 20000)
       : undefined;
 
+    // Real-time WebSocket listener via Laravel Reverb: instant standings update
+    const periodId = votingStatus?.period?.id;
+    const unsubscribe = periodId
+      ? subscribeVotingResults(periodId, (payload) => {
+          setEntries((prev) => {
+            const updated = prev.map((item) =>
+              item.article_id === payload.article_id
+                ? { ...item, vote_count: payload.vote_count }
+                : item,
+            );
+            return updated.sort((a, b) => b.vote_count - a.vote_count);
+          });
+          setUpdatedAt(payload.updated_at);
+        })
+      : () => {};
+
     return () => {
       controller.abort();
       if (interval !== undefined) window.clearInterval(interval);
+      unsubscribe();
     };
-  }, [role, votingStatus?.is_open, reloadToken]);
+  }, [role, votingStatus?.is_open, votingStatus?.period?.id, reloadToken]);
 
   if (role === "guest") {
     return (

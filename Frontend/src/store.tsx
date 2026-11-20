@@ -10,7 +10,6 @@ import {
 } from "react";
 import { initialArticles, type Article, type ArticleCategory, type ArticleStatus } from "./data";
 import {
-  approveArticle as approveArticleRequest,
   adminPublishArticle as adminPublishArticleRequest,
   createArticleDraft,
   getAdminArticles,
@@ -18,8 +17,6 @@ import {
   getCategories,
   getPublisherArticles,
   publishArticle as publishArticleRequest,
-  rejectArticle as rejectArticleRequest,
-  submitArticleForReview,
   toggleFeatureArticle,
   unpublishArticle as unpublishArticleRequest,
   updateArticleDraft,
@@ -35,7 +32,9 @@ import {
   type VoteRecordDto,
   type VotingStatusDto,
 } from "./services/votingService";
-import { getMe, logoutSession, type MeDto } from "./services/authService";
+import { getMe, logoutSession, updateProfileName, type MeDto } from "./services/authService";
+import { getMyComments, type CommentDto } from "./services/commentService";
+import { subscribeVotingResults, disconnectEcho } from "./services/echoService";
 import { ApiError, ApiUnavailableError } from "./services/apiClient";
 
 export type Role = "guest" | "participant" | "publisher" | "admin";
@@ -70,8 +69,11 @@ type Store = {
   refreshCategories: () => Promise<void>;
   votingStatus: VotingStatusDto | null;
   voteRecords: VoteRecordDto[];
+  myComments: CommentDto[];
   refreshVotingStatus: () => Promise<void>;
   refreshMyVotes: () => Promise<void>;
+  refreshMyComments: () => Promise<void>;
+  updateProfile: (name: string) => Promise<{ ok: boolean; message?: string }>;
   voted: string[];
   authOpen: boolean;
   setAuthOpen: (open: boolean) => void;
@@ -87,10 +89,7 @@ type Store = {
   // Editorial workflow actions (backend-authoritative).
   createDraft: (payload: ArticleDraftPayload) => Promise<EditorialResult>;
   updateDraft: (id: string, payload: ArticleUpdatePayload) => Promise<EditorialResult>;
-  submitForReview: (id: string) => Promise<EditorialResult>;
   publishOwn: (id: string) => Promise<EditorialResult>;
-  approve: (id: string) => Promise<EditorialResult>;
-  reject: (id: string, reason: string) => Promise<EditorialResult>;
   publishAny: (id: string) => Promise<EditorialResult>;
   unpublish: (id: string) => Promise<EditorialResult>;
   toggleFeatured: (id: string, isFeatured: boolean) => Promise<EditorialResult>;
@@ -104,7 +103,7 @@ export function deriveRole(user: MeDto | null): Role {
   if (
     user.roles.includes("administrator") ||
     user.permissions.some((permission) =>
-      ["article.review", "user.manage", "settings.manage"].includes(permission),
+      ["article.unpublish", "article.publish_any", "user.manage", "settings.manage"].includes(permission),
     )
   ) {
     return "admin";
@@ -196,6 +195,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [votingStatus, setVotingStatus] = useState<VotingStatusDto | null>(null);
   const votingOpenRef = useRef(false);
   const [voteRecords, setVoteRecords] = useState<VoteRecordDto[]>([]);
+  const [myComments, setMyComments] = useState<CommentDto[]>([]);
   const [voted, setVoted] = useState<string[]>([]);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingVote, setPendingVote] = useState<string | null>(null);
@@ -254,6 +254,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRoleState("guest");
     setVoted([]);
     setVoteRecords([]);
+    setMyComments([]);
+    disconnectEcho();
     localStorage.removeItem("minerva-role");
   }, []);
 
@@ -265,7 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isAdmin =
     role === "admin" ||
     (user?.roles.includes("administrator") ?? false) ||
-    hasPermission("article.review") ||
+    hasPermission("article.unpublish") ||
     hasPermission("user.manage") ||
     hasPermission("settings.manage");
 
@@ -276,7 +278,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     hasPermission("article.create");
 
   const canPublishDirectly =
-    Boolean(user?.capabilities.can_publish_directly) || hasPermission("article.publish_own");
+    isPublisher ||
+    Boolean(user?.capabilities.can_publish_directly) ||
+    hasPermission("article.publish_own");
 
   const requestVote = useCallback(
     (id: string) => {
@@ -311,6 +315,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Unauthenticated or unreachable sessions keep an empty vote cache.
     }
   }, []);
+
+  const refreshMyComments = useCallback(async () => {
+    try {
+      const res = await getMyComments(1);
+      setMyComments(res.data);
+    } catch {
+      // Unauthenticated or unreachable sessions keep an empty comment cache.
+    }
+  }, []);
+
+  const updateProfile = useCallback(
+    async (name: string): Promise<{ ok: boolean; message?: string }> => {
+      try {
+        const updated = await updateProfileName(name);
+        setAuthenticatedUser(updated);
+        return { ok: true };
+      } catch (error) {
+        if (error instanceof ApiError) {
+          return { ok: false, message: error.message };
+        }
+        return { ok: false, message: "Unable to update profile." };
+      }
+    },
+    [setAuthenticatedUser],
+  );
 
   const castVote = useCallback(
     async (id: string): Promise<CastVoteOutcome> => {
@@ -409,11 +438,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (role === "guest") {
       setVoted([]);
       setVoteRecords([]);
+      setMyComments([]);
       return;
     }
 
     void refreshMyVotes();
-  }, [role, refreshMyVotes]);
+    void refreshMyComments();
+  }, [role, refreshMyVotes, refreshMyComments]);
+
+  // Real-time WebSocket listener via Laravel Reverb: update article vote tallies immediately.
+  useEffect(() => {
+    if (role === "guest" || !votingStatus?.period?.id) {
+      return;
+    }
+
+    const unsubscribe = subscribeVotingResults(votingStatus.period.id, (payload) => {
+      setArticles((current) =>
+        current.map((item) =>
+          item.id === payload.article_id ? { ...item, votes: payload.vote_count } : item,
+        ),
+      );
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [role, votingStatus?.period?.id]);
 
   /** Applies a workflow response to the locally cached list. */
   const applyArticle = useCallback((dto: ArticleDetailDto) => {
@@ -466,25 +516,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [runAction],
   );
 
-  const submitForReview = useCallback(
-    async (id: string): Promise<EditorialResult> =>
-      runAction(() => submitArticleForReview(id)),
-    [runAction],
-  );
-
   const publishOwn = useCallback(
     async (id: string): Promise<EditorialResult> => runAction(() => publishArticleRequest(id)),
-    [runAction],
-  );
-
-  const approve = useCallback(
-    async (id: string): Promise<EditorialResult> => runAction(() => approveArticleRequest(id)),
-    [runAction],
-  );
-
-  const reject = useCallback(
-    async (id: string, reason: string): Promise<EditorialResult> =>
-      runAction(() => rejectArticleRequest(id, reason)),
     [runAction],
   );
 
@@ -539,8 +572,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshCategories,
       votingStatus,
       voteRecords,
+      myComments,
       refreshVotingStatus,
       refreshMyVotes,
+      refreshMyComments,
+      updateProfile,
       voted,
       authOpen,
       setAuthOpen,
@@ -555,10 +591,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       markRead: () => setUnread(0),
       createDraft,
       updateDraft,
-      submitForReview,
       publishOwn,
-      approve,
-      reject,
       publishAny,
       unpublish,
       toggleFeatured,
@@ -585,8 +618,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshCategories,
       votingStatus,
       voteRecords,
+      myComments,
       refreshVotingStatus,
       refreshMyVotes,
+      refreshMyComments,
+      updateProfile,
       voted,
       authOpen,
       pendingVote,
@@ -595,10 +631,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unread,
       createDraft,
       updateDraft,
-      submitForReview,
       publishOwn,
-      approve,
-      reject,
       publishAny,
       unpublish,
       toggleFeatured,

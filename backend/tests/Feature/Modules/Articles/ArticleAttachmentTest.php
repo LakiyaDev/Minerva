@@ -125,7 +125,7 @@ it('forbids a non-owner from uploading an attachment to another author draft', f
     expect(ArticleAttachment::query()->count())->toBe(0);
 });
 
-it('forbids uploading attachments to pending_review or published articles without admin permission', function (ArticleStatus $status): void {
+it('forbids uploading attachments to unpublished or published articles without admin permission', function (ArticleStatus $status): void {
     $owner = identityUser('publisher');
     $article = Article::factory()->withStatus($status)->create([
         'author_id' => $owner->getKey(),
@@ -139,7 +139,7 @@ it('forbids uploading attachments to pending_review or published articles withou
         'file' => $file,
     ])->assertForbidden();
 })->with([
-    'pending_review' => [ArticleStatus::PendingReview],
+    'unpublished' => [ArticleStatus::Unpublished],
     'published' => [ArticleStatus::Published],
 ]);
 

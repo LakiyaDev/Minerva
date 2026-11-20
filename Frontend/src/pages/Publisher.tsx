@@ -1,5 +1,29 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
-import { ArrowUpRight, Check, Download, Edit3, Eye, Paperclip, Plus, Search, Send, Trash2, Upload, X } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  ArrowUpRight,
+  BarChart3,
+  Check,
+  Download,
+  Edit3,
+  Eye,
+  MessageSquare,
+  Paperclip,
+  Plus,
+  Search,
+  Trash2,
+  TrendingUp,
+  Upload,
+  Vote,
+  X,
+} from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { articleStatusLabels, type Article, type ArticleStatus } from "../data";
 import {
@@ -11,6 +35,10 @@ import {
   type ArticleAttachmentDto,
   type ArticleStatusHistoryDto,
 } from "../services/articleService";
+import {
+  getPublisherArticleAnalytics,
+  type ArticleAnalyticsDto,
+} from "../services/analyticsService";
 import { ApiError, ApiUnavailableError } from "../services/apiClient";
 import { useApp, type EditorialResult } from "../store";
 
@@ -28,7 +56,7 @@ function formatTimestamp(value?: string): string {
 }
 
 export function PublisherDashboard() {
-  const { loadPublisherArticles, submitForReview, publishOwn, canPublishDirectly } = useApp();
+  const { loadPublisherArticles, publishOwn } = useApp();
   const [rows, setRows] = useState<Article[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ArticleStatus | "">("");
@@ -36,6 +64,10 @@ export function PublisherDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [analyticsTargetId, setAnalyticsTargetId] = useState<string | null>(null);
+  const [analyticsData, setAnalyticsData] = useState<ArticleAnalyticsDto | null>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const location = useLocation();
 
   useEffect(() => {
@@ -45,6 +77,21 @@ export function PublisherDashboard() {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  const openAnalytics = async (articleId: string) => {
+    setAnalyticsTargetId(articleId);
+    setAnalyticsData(null);
+    setAnalyticsError(null);
+    setLoadingAnalytics(true);
+    try {
+      const data = await getPublisherArticleAnalytics(articleId);
+      setAnalyticsData(data);
+    } catch (err) {
+      setAnalyticsError(err instanceof Error ? err.message : "Unable to load analytics.");
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -91,9 +138,8 @@ export function PublisherDashboard() {
   const counts = {
     total: rows.length,
     drafts: rows.filter((a) => a.status === "draft").length,
-    pending: rows.filter((a) => a.status === "pending_review").length,
-    rejected: rows.filter((a) => a.status === "rejected").length,
     published: rows.filter((a) => a.status === "published").length,
+    unpublished: rows.filter((a) => a.status === "unpublished").length,
   };
 
   const filtered = rows.filter(
@@ -135,9 +181,8 @@ export function PublisherDashboard() {
         {[
           [counts.total, "total articles"],
           [counts.drafts, "drafts"],
-          [counts.pending, "pending review"],
-          [counts.rejected, "needs revision"],
           [counts.published, "published"],
+          [counts.unpublished, "removed by admin"],
         ].map(([value, label]) => (
           <div className="stat-card" key={label}>
             <strong>{value}</strong>
@@ -182,9 +227,7 @@ export function PublisherDashboard() {
           <p className="empty-state-copy">No articles yet. Create your first draft.</p>
         ) : (
           filtered.map((a) => {
-            const editable = a.status === "draft" || a.status === "rejected";
-            const canDirectPublish =
-              canPublishDirectly && (a.status === "draft" || a.status === "approved");
+            const editable = a.status === "draft";
 
             return (
               <div className="table-row" key={a.id}>
@@ -208,28 +251,11 @@ export function PublisherDashboard() {
                   {editable && (
                     <button
                       type="button"
-                      title="Submit for review"
-                      aria-label="Submit for review"
+                      title="Publish article"
+                      aria-label="Publish article"
                       disabled={busyId === a.id}
                       onClick={() =>
-                        void runAction(
-                          a.id,
-                          () => submitForReview(a.id),
-                          "Article submitted for editorial review.",
-                        )
-                      }
-                    >
-                      <Send />
-                    </button>
-                  )}
-                  {canDirectPublish && (
-                    <button
-                      type="button"
-                      title="Direct publish"
-                      aria-label="Direct publish"
-                      disabled={busyId === a.id}
-                      onClick={() =>
-                        void runAction(a.id, () => publishOwn(a.id), "Article published directly.")
+                        void runAction(a.id, () => publishOwn(a.id), "Article published.")
                       }
                     >
                       <ArrowUpRight />
@@ -244,12 +270,111 @@ export function PublisherDashboard() {
                       <Eye />
                     </Link>
                   )}
+                  <button
+                    type="button"
+                    title="Article analytics"
+                    aria-label="Article analytics"
+                    onClick={() => void openAnalytics(a.id)}
+                  >
+                    <BarChart3 />
+                  </button>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {analyticsTargetId && (
+        <div className="modal-backdrop">
+          <div className="confirm-modal" style={{ maxWidth: "680px", width: "95%" }}>
+            <button
+              className="modal-close"
+              onClick={() => {
+                setAnalyticsTargetId(null);
+                setAnalyticsData(null);
+              }}
+            >
+              <X />
+            </button>
+            <span className="eyebrow">performance & engagement.</span>
+            <h3>Article analytics</h3>
+
+            {loadingAnalytics && <p className="empty-state-copy">Computing metrics…</p>}
+
+            {analyticsError && (
+              <div className="error-banner" role="alert">
+                <span>{analyticsError}</span>
+              </div>
+            )}
+
+            {analyticsData && (
+              <div style={{ display: "grid", gap: "1.25rem", marginTop: "1rem" }}>
+                <div>
+                  <h4 style={{ margin: "0 0 0.25rem 0", fontSize: "1.1rem" }}>
+                    {analyticsData.article.title}
+                  </h4>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <span className={`status ${analyticsData.article.status}`}>
+                      {analyticsData.article.status_label}
+                    </span>
+                    {analyticsData.article.category && (
+                      <small className="field-hint">
+                        {analyticsData.article.category.name}
+                      </small>
+                    )}
+                  </div>
+                </div>
+
+                <div className="stats-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
+                  <div className="stat-card">
+                    <strong>{analyticsData.engagement.total_votes}</strong>
+                    <span>total votes</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>
+                      {analyticsData.engagement.rank ? `#${analyticsData.engagement.rank}` : "—"}
+                    </strong>
+                    <span>competition rank</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>{analyticsData.engagement.total_comments}</strong>
+                    <span>total comments</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>{analyticsData.benchmarks.category_average_votes}</strong>
+                    <span>category avg votes</span>
+                  </div>
+                </div>
+
+                {analyticsData.daily_votes.length > 0 && (
+                  <div style={{ border: "1px solid rgba(128,128,128,0.2)", borderRadius: "8px", padding: "1rem" }}>
+                    <span className="eyebrow" style={{ display: "block", marginBottom: "0.5rem" }}>
+                      vote velocity (last 14 days)
+                    </span>
+                    <div style={{ width: "100%", height: 160 }}>
+                      <ResponsiveContainer>
+                        <AreaChart data={analyticsData.daily_votes}>
+                          <XAxis dataKey="label" stroke="#888" fontSize={11} tickLine={false} />
+                          <YAxis stroke="#888" fontSize={11} tickLine={false} allowDecimals={false} />
+                          <Tooltip />
+                          <Area
+                            type="monotone"
+                            dataKey="votes"
+                            stroke="#C9A227"
+                            fill="rgba(201, 162, 39, 0.2)"
+                            strokeWidth={2}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -258,8 +383,7 @@ export function PublisherArticleEditor() {
   const { id } = useParams();
   const isEditing = Boolean(id);
   const navigate = useNavigate();
-  const { categories, createDraft, updateDraft, submitForReview, publishOwn, canPublishDirectly } =
-    useApp();
+  const { categories, createDraft, updateDraft, publishOwn } = useApp();
 
   const [title, setTitle] = useState("");
   const [abstract, setAbstract] = useState("");
@@ -307,8 +431,7 @@ export function PublisherArticleEditor() {
     return () => controller.abort();
   }, [id]);
 
-  const isEditable = !isEditing || status === "draft" || status === "rejected";
-  const latestRejection = [...history].reverse().find((entry) => entry.to_status === "rejected");
+  const isEditable = !isEditing || status === "draft";
 
   const handleAttachmentUpload = async (files: FileList | null) => {
     if (!id || !isEditable || !files || files.length === 0) return;
@@ -397,19 +520,6 @@ export function PublisherArticleEditor() {
       targetId = saveResult.id ?? "";
     }
 
-    if (intent === "submit" && targetId) {
-      const submitRes = await submitForReview(targetId);
-      setSubmitting(false);
-      if (!submitRes.ok) {
-        navigate("/publisher", {
-          state: { notice: `${submitRes.message} Your draft changes were saved.` },
-        });
-        return;
-      }
-      navigate("/publisher", { state: { notice: "Article submitted for review." } });
-      return;
-    }
-
     if (intent === "publish" && targetId) {
       const publishRes = await publishOwn(targetId);
       setSubmitting(false);
@@ -419,7 +529,7 @@ export function PublisherArticleEditor() {
         });
         return;
       }
-      navigate("/publisher", { state: { notice: "Article published directly." } });
+      navigate("/publisher", { state: { notice: "Article published." } });
       return;
     }
 
@@ -457,14 +567,6 @@ export function PublisherArticleEditor() {
               This article is locked for editing while in {articleStatusLabels[status]} status.
             </small>
           )}
-        </div>
-      )}
-
-      {latestRejection?.reason && (
-        <div className="error-banner" role="alert">
-          <span>
-            <strong>Reviewer feedback:</strong> {latestRejection.reason}
-          </span>
         </div>
       )}
 
@@ -548,10 +650,9 @@ export function PublisherArticleEditor() {
             <header>
               <span>02</span>
               <div>
-                <h2>Workflow actions</h2>
+                <h2>Publishing actions</h2>
                 <p>
-                  Save a private draft, submit to the editorial review queue, or publish directly if
-                  authorized.
+                  Save a private draft to edit later, or publish directly to make your article visible on the platform.
                 </p>
               </div>
             </header>
@@ -559,14 +660,9 @@ export function PublisherArticleEditor() {
               <button className="btn outline" type="submit" value="draft" disabled={submitting}>
                 {submitting ? "saving…" : "save draft"}
               </button>
-              <button className="btn" type="submit" value="submit" disabled={submitting}>
-                <Send size={14} /> submit for review
+              <button className="btn" type="submit" value="publish" disabled={submitting}>
+                <Check size={14} /> publish article
               </button>
-              {canPublishDirectly && (
-                <button className="btn" type="submit" value="publish" disabled={submitting}>
-                  <Check size={14} /> direct publish
-                </button>
-              )}
             </div>
           </section>
         )}

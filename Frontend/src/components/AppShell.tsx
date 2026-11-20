@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   MessageSquare,
+  ScrollText,
   Settings,
   UserRound,
   UsersRound,
@@ -48,6 +49,7 @@ export function AppShell({
           ["/admin/voting", "Voting", History],
           ["/admin/results", "Results", ChartNoAxesColumn],
           ["/admin/participants", "Participants", UsersRound],
+          ["/admin/audit-logs", "Audit logs", ScrollText],
           ["/admin/settings", "Settings", Settings],
         ]
       : activeShell === "publisher"

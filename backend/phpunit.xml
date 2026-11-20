@@ -32,6 +32,13 @@
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <env name="BROADCAST_CONNECTION" value="log"/>
+        <env name="REVERB_APP_ID" value="minerva-app"/>
+        <env name="REVERB_APP_KEY" value="minerva-reverb-key"/>
+        <env name="REVERB_APP_SECRET" value="minerva-reverb-secret"/>
+        <env name="REVERB_HOST" value="127.0.0.1"/>
+        <env name="REVERB_PORT" value="8080"/>
+        <env name="REVERB_SCHEME" value="http"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="STAFF_PASSWORD_UNCOMPROMISED" value="false"/>
         <env name="STAFF_MFA_REQUIRED" value="true"/>

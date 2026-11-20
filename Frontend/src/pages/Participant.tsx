@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Bell, Check, Clock3, Feather, KeyRound, Mail, MessageSquare, Search, Trash2, UserRound } from "lucide-react";
+import {
+  Bell,
+  Check,
+  Clock3,
+  Feather,
+  KeyRound,
+  LogOut,
+  Mail,
+  MessageSquare,
+  Search,
+  Shield,
+  ShieldCheck,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { Link } from "react-router";
 import { ArticleCard } from "../components/ArticleCard";
 import type { Article } from "../data";
 import { deleteComment, getMyComments, type CommentDto } from "../services/commentService";
+import { revokeOtherSessions } from "../services/authService";
 import type { VoteRecordDto } from "../services/votingService";
 import { useApp } from "../store";
 
@@ -15,7 +30,7 @@ function formatShortDate(value?: string | null): string {
 }
 
 export function Dashboard() {
-  const { articles, voted, votingStatus, voteRecords } = useApp();
+  const { articles, voted, votingStatus, voteRecords, myComments, user } = useApp();
   const published = articles.filter((a) => a.status === "published");
   const totalVotes = published.reduce((sum, a) => sum + a.votes, 0);
   const remaining = Math.max(0, published.length - voted.length);
@@ -24,14 +39,51 @@ export function Dashboard() {
     : 0;
   const isOpen = votingStatus ? votingStatus.is_open : true;
 
+  const recentActivity = useMemo(() => {
+    type ActivityItem = {
+      id: string;
+      type: "vote" | "comment";
+      title: string;
+      slug: string;
+      snippet?: string;
+      date: string;
+    };
+
+    const items: ActivityItem[] = [];
+
+    voteRecords.forEach((record) => {
+      items.push({
+        id: `vote-${record.id}`,
+        type: "vote",
+        title: record.article?.title ?? "Article ballot",
+        slug: record.article?.slug || record.article_id,
+        date: record.created_at,
+      });
+    });
+
+    myComments.forEach((comment) => {
+      items.push({
+        id: `comment-${comment.id}`,
+        type: "comment",
+        title: comment.article?.title ?? "Article discussion",
+        slug: comment.article?.slug || comment.article_id,
+        snippet: comment.body,
+        date: comment.created_at || new Date().toISOString(),
+      });
+    });
+
+    items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return items.slice(0, 6);
+  }, [voteRecords, myComments]);
+
   return (
     <div className="dash-page">
       <header className="dash-heading">
         <div>
           <span className="eyebrow">your overview.</span>
-          <h1>Good morning.</h1>
+          <h1>Good morning, {user?.name ? user.name.split(" ")[0] : "reader"}.</h1>
           <p>
-            Your ballot is taking shape. There are {remaining} articles left to consider.
+            Your ballot and community engagement are taking shape. There are {remaining} articles left to consider.
           </p>
         </div>
         <Link className="btn" to="/articles">
@@ -42,6 +94,7 @@ export function Dashboard() {
         {[
           [published.length, "published essays"],
           [voted.length, "votes recorded"],
+          [myComments.length, "comments posted"],
           [remaining, "still to consider"],
           [totalVotes.toLocaleString(), "community votes"],
         ].map(([value, label]) => (
@@ -58,7 +111,10 @@ export function Dashboard() {
           <p>
             Each article deserves an attentive read. Your votes cannot be changed once recorded.
           </p>
-          <Link to="/my-votes">review my voting history →</Link>
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+            <Link to="/my-votes">review voting history ({voted.length}) →</Link>
+            <Link to="/my-comments">view my comments ({myComments.length}) →</Link>
+          </div>
         </div>
         <div
           className="progress-ring"
@@ -90,23 +146,40 @@ export function Dashboard() {
       <section className="activity-panel">
         <div>
           <span className="eyebrow">recent activity.</span>
-          <h2>Your week in MINERVA.</h2>
+          <h2>Your journey in MINERVA.</h2>
         </div>
         <div>
-          {voteRecords.length > 0 ? (
+          {recentActivity.length > 0 ? (
             <ul className="activity-list">
-              {voteRecords.slice(0, 5).map((record) => (
-                <li key={record.id}>
-                  <Check size={14} />{" "}
-                  <Link to={`/articles/${record.article?.slug || record.article_id}`}>
-                    {record.article?.title ?? "Article vote"}
-                  </Link>{" "}
-                  <span>· voted {formatShortDate(record.created_at)}</span>
+              {recentActivity.map((item) => (
+                <li key={item.id} style={{ alignItems: "flex-start", gap: "0.6rem" }}>
+                  {item.type === "vote" ? (
+                    <Check size={14} style={{ marginTop: "3px", color: "var(--bronze, #8a6d3b)" }} />
+                  ) : (
+                    <MessageSquare size={14} style={{ marginTop: "3px", color: "#6b705c" }} />
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                    <div>
+                      <Link to={`/articles/${item.slug}`}>
+                        {item.title}
+                      </Link>{" "}
+                      <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>
+                        · {item.type === "vote" ? "voted" : "commented"} {formatShortDate(item.date)}
+                      </span>
+                    </div>
+                    {item.snippet && (
+                      <small style={{ opacity: 0.75, fontStyle: "italic", maxWidth: "450px" }}>
+                        "{item.snippet.slice(0, 90)}{item.snippet.length > 90 ? "…" : ""}"
+                      </small>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="empty-state-copy">No recent activity.</p>
+            <p className="empty-state-copy">
+              No recent activity. Cast a vote or share a perspective in the comments to see it recorded here.
+            </p>
           )}
         </div>
       </section>
@@ -284,29 +357,106 @@ export function Notifications() {
 }
 
 export function Profile() {
-  const [saved, setSaved] = useState(false);
-  const submit = (e: FormEvent) => {
+  const { user, updateProfile, logout } = useApp();
+  const [name, setName] = useState(user?.name ?? "");
+  const [saving, setSaving] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    if (user?.name) {
+      setName(user.name);
+    }
+  }, [user?.name]);
+
+  const handleUpdateName = async (e: FormEvent) => {
     e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (!name.trim()) return;
+
+    setSaving(true);
+    setFeedback(null);
+    const result = await updateProfile(name.trim());
+    setSaving(false);
+
+    if (result.ok) {
+      setFeedback({ type: "success", text: "Your profile name has been updated successfully." });
+    } else {
+      setFeedback({ type: "error", text: result.message || "Unable to update profile name." });
+    }
   };
+
+  const handleRevokeSessions = async () => {
+    if (
+      !window.confirm(
+        "This will sign out all your other active sessions across browsers and devices. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    setRevoking(true);
+    setFeedback(null);
+    try {
+      const res = await revokeOtherSessions();
+      setFeedback({
+        type: "success",
+        text: `Active sessions revoked successfully (${res.revoked_sessions} other session(s) ended).`,
+      });
+    } catch (err) {
+      setFeedback({
+        type: "error",
+        text: err instanceof Error ? err.message : "Unable to revoke active sessions.",
+      });
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  const initials = user?.name
+    ? user.name
+        .split(" ")
+        .map((n) => n[0])
+        .filter(Boolean)
+        .slice(0, 2)
+        .join("")
+        .toUpperCase()
+    : "P";
+
   return (
     <div className="dash-page">
       <header className="dash-heading">
         <div>
           <span className="eyebrow">your identity.</span>
           <h1>Profile & security.</h1>
+          <p>Manage your account identity and active sessions across the platform.</p>
         </div>
       </header>
+
+      {feedback && (
+        <div
+          className={feedback.type === "success" ? "notice-banner" : "error-banner"}
+          role="alert"
+          style={{ marginBottom: "1.25rem" }}
+        >
+          <span>{feedback.text}</span>
+        </div>
+      )}
+
       <div className="profile-grid">
         <aside>
-          <div className="large-avatar">—</div>
-          <h2>Participant</h2>
-          <p>Account details</p>
-          <span>Member</span>
+          <div className="large-avatar">{initials}</div>
+          <h2>{user?.name ?? "Participant"}</h2>
+          <p>{user?.email ?? "Signed in"}</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", justifyContent: "center", marginTop: "0.5rem" }}>
+            {user?.roles?.map((r) => (
+              <span key={r} style={{ fontSize: "0.75rem", textTransform: "capitalize" }}>
+                {r}
+              </span>
+            )) ?? <span>Member</span>}
+          </div>
         </aside>
         <div>
-          <form className="profile-form" onSubmit={submit}>
+          <form className="profile-form" onSubmit={handleUpdateName}>
             <header>
               <UserRound />
               <div>
@@ -317,48 +467,92 @@ export function Profile() {
             <div className="two-col">
               <label>
                 Full name
-                <input placeholder="Full name" />
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Full name"
+                  required
+                />
               </label>
               <label>
                 Email address
-                <input type="email" placeholder="name@example.com" />
+                <input
+                  type="email"
+                  value={user?.email ?? ""}
+                  disabled
+                  title="Email cannot be changed directly"
+                  style={{ opacity: 0.7, cursor: "not-allowed" }}
+                />
               </label>
             </div>
-            <label>
-              Faculty
-              <select defaultValue="">
-                <option value="" disabled>Select faculty</option>
-                <option>Faculty of Medical Sciences</option>
-                <option>Faculty of Applied Sciences</option>
-                <option>Faculty of Technology</option>
-              </select>
-            </label>
-            <button className="btn">{saved ? "changes saved" : "save changes"}</button>
+            <p style={{ fontSize: "0.8rem", opacity: 0.7, margin: "0.25rem 0 0.75rem" }}>
+              Your email is the verified primary identifier for your ballots and access tokens.
+            </p>
+            <button className="btn" disabled={saving}>
+              {saving ? "saving…" : "save changes"}
+            </button>
           </form>
-          <form className="profile-form" onSubmit={(e) => e.preventDefault()}>
+
+          <section
+            className="profile-form"
+            style={{ marginTop: "1.5rem" }}
+          >
             <header>
-              <KeyRound />
+              <ShieldCheck />
               <div>
-                <h2>Change password</h2>
-                <p>Use at least eight characters.</p>
+                <h2>Account security &amp; sessions</h2>
+                <p>Monitor your authentication state and manage active tokens.</p>
               </div>
             </header>
-            <label>
-              Current password
-              <input type="password" />
-            </label>
-            <div className="two-col">
-              <label>
-                New password
-                <input type="password" />
-              </label>
-              <label>
-                Confirm password
-                <input type="password" />
-              </label>
+            <div style={{ display: "grid", gap: "0.75rem", padding: "0.5rem 0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem", background: "rgba(128,128,128,0.06)", borderRadius: "6px" }}>
+                <div>
+                  <strong>Two-Factor Authentication (TOTP)</strong>
+                  <p style={{ margin: "0.2rem 0 0", fontSize: "0.82rem", opacity: 0.75 }}>
+                    {user?.two_factor_enabled
+                      ? "Two-factor authentication is active and protecting your account."
+                      : "Staff members require MFA for editorial and management actions."}
+                  </p>
+                </div>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: user?.two_factor_enabled ? "#2e7d32" : "#8a6d3b" }}>
+                  {user?.two_factor_enabled ? "Enabled" : "Not configured"}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem", background: "rgba(128,128,128,0.06)", borderRadius: "6px" }}>
+                <div>
+                  <strong>Active Sessions</strong>
+                  <p style={{ margin: "0.2rem 0 0", fontSize: "0.82rem", opacity: 0.75 }}>
+                    Terminate all other logged-in browser sessions and mobile devices.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn outline"
+                  onClick={() => void handleRevokeSessions()}
+                  disabled={revoking}
+                >
+                  {revoking ? "revoking…" : "revoke other sessions"}
+                </button>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.75rem", background: "rgba(128,128,128,0.06)", borderRadius: "6px" }}>
+                <div>
+                  <strong>Sign Out</strong>
+                  <p style={{ margin: "0.2rem 0 0", fontSize: "0.82rem", opacity: 0.75 }}>
+                    End your current session safely on this device.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn outline"
+                  onClick={() => void logout()}
+                >
+                  <LogOut size={14} /> log out
+                </button>
+              </div>
             </div>
-            <button className="btn outline">update password</button>
-          </form>
+          </section>
         </div>
       </div>
     </div>

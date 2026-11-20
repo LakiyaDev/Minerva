@@ -54,7 +54,10 @@ return new class extends Migration
         });
 
         Schema::create('personal_access_tokens', function (Blueprint $table): void {
-            $table->ulid('id')->primary();
+            // Standard Sanctum shape (schema v1.1 §4.8): auto-increment id.
+            // `tokenable_id` stays a ULID because every other key in this
+            // codebase is one (deviation V1).
+            $table->id();
             $table->ulidMorphs('tokenable');
             $table->string('name');
             $table->string('token', 64)->unique();

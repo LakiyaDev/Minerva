@@ -42,8 +42,7 @@ Laravel application (single deployable)
 ├── Voting                 ─── voting periods, votes, result broadcasts
 ├── Comments & Moderation  ─── comments, moderation records
 ├── Analytics              ─── publisher and platform read models
-├── Administration         ─── management orchestration and platform settings
-├── Integrations           ─── service API keys and external-facing integrations
+├── Administration         ─── management orchestration
 └── Audit                  ─── append-only accountability records
 ```
 
@@ -61,7 +60,6 @@ app/
     Comments/
     Analytics/
     Administration/
-    Integrations/
     Audit/
   Shared/
     Http/  Support/  ValueObjects/  Exceptions/
@@ -85,8 +83,7 @@ For a larger codebase, modules may instead be local Composer packages under `mod
 | Voting | Voting periods, votes, vote summaries | Eligibility, final votes, result calculations | `VoteRecorded`, `VotingResultsUpdated` |
 | Comments & Moderation | Comments, moderation records | Comment lifecycle and moderation | `CommentSubmitted`, `CommentRemoved` |
 | Analytics | Read models/caches only | Owner and platform reporting | Consumes domain events; exposes report queries |
-| Administration | Settings and admin orchestration | Dashboard aggregation and coordinated management actions | Calls module service contracts only |
-| Integrations | API keys/integration metadata | Scoped service key lifecycle and integration APIs | `ApiKeyCreated`, `ApiKeyRevoked`, `ApiKeyUsed` |
+| Administration | Admin orchestration | Dashboard aggregation and coordinated management actions | Calls module service contracts only |
 | Audit | Audit logs | Immutable accountability records | Consumes auditable events |
 
 ### 3.3 Module dependency rules
@@ -108,7 +105,6 @@ For a larger codebase, modules may instead be local Composer packages under `mod
 | Voting | `/voting/*`, `/articles/{article}/votes`, `/articles/{article}/vote-results`, `/me/votes` |
 | Comments & Moderation | `/articles/{article}/comments`, `/me/comments`, `/admin/comments/*` |
 | Analytics | `/publisher/articles/{article}/analytics`, `/admin/analytics` |
-| Integrations | `/admin/api-keys/*`, `/integrations/*` |
 | Audit | `/admin/audit-logs` |
 
 ### 3.5 Cross-module workflow examples
@@ -160,8 +156,8 @@ Use permission checks/policies rather than a single role-name condition. A user 
 Core permissions:
 
 - `participant.vote`, `participant.comment`, `participant.view_results`
-- `article.create`, `article.submit`, `article.update_own`, `article.publish_own`
-- `article.review`, `article.publish_any`, `article.unpublish`, `article.feature`
+- `article.create`, `article.update_own`, `article.publish_own`
+- `article.publish_any`, `article.unpublish`, `article.feature`
 - `comment.moderate`
 - `user.manage`, `publisher.manage` (`content.manage` is reserved/unused because static informational site content is hardcoded in the frontend)
 - `analytics.view_own`, `analytics.view_all`, `settings.manage`, `audit.view`
@@ -203,9 +199,9 @@ Implementation note: participants may be publishers, and administrators may also
 | `article_attachments` | `id`, `article_id`, `storage_disk`, `storage_key`, `original_name`, `mime_type`, `size_bytes`, `kind` | FK to article; never store public S3 secrets/URLs. |
 | `article_status_history` | `id`, `article_id`, `from_status`, `to_status`, `acted_by`, `reason`, `created_at` | Index `(article_id, created_at)`; append-only history. |
 
-Allowed article statuses: `draft`, `pending_review`, `approved`, `rejected`, `published`, `unpublished`.
+Allowed article statuses: `draft`, `published`, `unpublished`.
 
-The state transition service must validate allowed transitions. For example, only an owner with article-update rights can save a draft; only an administrator/reviewer can approve or reject; direct publish requires the publisher’s explicit direct-publish permission; only published articles appear in public listings.
+The state transition service must validate allowed transitions. An owner with article-update rights can save a draft and publish directly (`draft` -> `published`); only an administrator can unpublish/remove any published article (`published` -> `unpublished`), republish an unpublished article, or feature an article; only published articles appear in public listings.
 
 ### 5.4 Voting tables and transactional integrity
 
@@ -286,8 +282,7 @@ All endpoint paths below are relative to `/api/v1`. “Auth” means a valid use
 | POST | `/publisher/articles` | Publisher | `article.create` | Create draft. |
 | GET | `/publisher/articles/{article}` | Publisher | ownership/policy | View own editable article. |
 | PATCH | `/publisher/articles/{article}` | Publisher | `article.update_own` | Update allowed draft/article fields. |
-| POST | `/publisher/articles/{article}/submit` | Publisher | `article.submit` | Submit for review. |
-| POST | `/publisher/articles/{article}/publish` | Publisher | `article.publish_own` | Direct-publish if granted. |
+| POST | `/publisher/articles/{article}/publish` | Publisher | `article.publish_own` | Direct-publish own draft. |
 | POST | `/publisher/articles/{article}/attachments` | Publisher | ownership/policy | Upload permitted attachment. |
 | DELETE | `/publisher/articles/{article}/attachments/{attachment}` | Publisher | ownership/policy | Remove permitted attachment. |
 | GET | `/publisher/articles/{article}/analytics` | Publisher | `analytics.view_own` | Own-article analytics only. |
@@ -311,11 +306,9 @@ All endpoint paths below are relative to `/api/v1`. “Auth” means a valid use
 | GET/PATCH | `/admin/users` and `/admin/users/{user}` | `user.manage` | Find/manage user accounts and roles. |
 | POST/DELETE | `/admin/users/{user}/publisher-permission` | `publisher.manage` | Grant/revoke publisher capability. |
 | PATCH | `/admin/users/{user}/publisher-permission` | `publisher.manage` | Configure direct-publish eligibility. |
-| GET | `/admin/articles/review-queue` | `article.review` | Reviewable article list. |
-| POST | `/admin/articles/{article}/approve` | `article.review` | Approve article. |
-| POST | `/admin/articles/{article}/reject` | `article.review` | Reject article with reason. |
+| GET | `/admin/articles` | `article.unpublish` | List all articles for management. |
 | POST | `/admin/articles/{article}/publish` | `article.publish_any` | Publish article. |
-| POST | `/admin/articles/{article}/unpublish` | `article.unpublish` | Remove public visibility. |
+| POST | `/admin/articles/{article}/unpublish` | `article.unpublish` | Remove/unpublish any published article. |
 | POST | `/admin/articles/{article}/feature` | `article.feature` | Mark/unmark featured. |
 | GET/PATCH | `/admin/voting-periods` and `/admin/voting-periods/{period}` | `settings.manage` | Configure voting window. |
 | GET | `/admin/comments` | `comment.moderate` | Moderation queue. |
@@ -341,59 +334,9 @@ Authorization: Bearer <user-access-token>
 
 The client must treat `401` as an expired/invalid session and `403` as an authenticated but unauthorized request. It must not retry votes or moderation mutations automatically unless the API explicitly supports an idempotency key.
 
-### 7.2 Server-to-server API keys
-
-API keys are for explicitly approved service-to-service integrations (for example, a reporting tool or institutional system). They are **not** a substitute for user login and must never be embedded in the React app, browser storage, client-side environment variables, screenshots, or source control.
-
-Recommended key format:
-
-```text
-mnv_live_<public_key_id>_<secret>
-```
-
-Only a SHA-256/HMAC hash of the full secret is stored. The plaintext key is displayed exactly once when created.
-
-#### API-key table
-
-| Table | Key fields | Security rules |
-|---|---|---|
-| `api_keys` | `id`, `public_id`, `name`, `secret_hash`, `scopes`, `created_by`, `last_used_at`, `expires_at`, `revoked_at` | Unique `public_id`; store only hash; encrypted/protected scopes metadata; index active keys. |
-
-Suggested service scopes: `analytics.read`, `content.read`, `webhook.receive`. Do not grant broad user-management, voting, editorial approval, or database access to an API key unless a formally approved integration requires it.
-
-#### API-key lifecycle endpoints
-
-These endpoints are administrator-only and should require recent re-authentication/MFA where available.
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/admin/api-keys` | List key metadata only—never return secrets. |
-| POST | `/admin/api-keys` | Create scoped, expiring key; plaintext secret returned once. |
-| GET | `/admin/api-keys/{apiKey}` | View key metadata and recent usage. |
-| PATCH | `/admin/api-keys/{apiKey}` | Rename, modify permitted scopes/expiry where policy allows. |
-| POST | `/admin/api-keys/{apiKey}/rotate` | Create replacement secret; revoke old secret on the defined grace schedule. |
-| POST | `/admin/api-keys/{apiKey}/revoke` | Immediately revoke key and record audit entry. |
-
-Service request example:
-
-```http
-GET /api/v1/integrations/analytics/articles HTTP/1.1
-Accept: application/json
-X-API-Key: mnv_live_publicid_secret
-```
-
-Alternatively use `Authorization: Bearer <service-api-key>`; choose one convention and document it in OpenAPI. Middleware must verify the hash in constant time, reject expired/revoked keys, apply scopes, record `last_used_at` asynchronously, and enforce a dedicated rate limit.
-
-### 7.3 API-key safeguards
-
-- Generate secrets from a cryptographically secure random source with at least 256 bits of entropy.
-- Redact `Authorization`, `X-API-Key`, cookies, passwords, reset tokens, and presigned URLs in all logs/error tools.
-- Rate-limit by key, route, IP, and endpoint sensitivity; return `429` with retry guidance.
-- Add expiration to every new key; rotate regularly and revoke immediately if exposed.
-- Audit creation, viewing metadata, rotation, scope change, and revocation.
-- Restrict keys by minimum scope and optionally by IP allow-list for trusted integrations.
-- Do not create an endpoint that reveals a previously issued full key.
-- Store production keys only in a secrets manager/CI secret store, never in `.env` committed to Git.
+> **Architecture Decision — No Headless Integrations / API Keys & Platform Settings Table:**
+> 1. **No Service API Keys / Integrations:** The platform is designed exclusively for user-facing browser access via Google OAuth and staff password/MFA Sanctum sessions. External machine-to-machine integrations and service API keys are not required and are omitted.
+> 2. **No Dynamic Platform Settings Table:** System configuration (contact email, site notices, maintenance mode) is maintained via `.env` environment variables and static configuration files. Dynamic `platform_settings` database tables and `/admin/settings` endpoints are omitted to keep the system simple and reliable.
 
 ### 7.4 File-upload integration
 
@@ -486,7 +429,7 @@ Security schemes to document:
 4. Implement Voting, including transaction-safe vote creation, results, and Reverb broadcasts.
 5. Implement Comments & Moderation and Audit event listeners.
 6. Implement Analytics read models and Administration orchestration with ownership protections.
-7. Implement Integrations, API-key lifecycle, security hardening, queues, backups/monitoring, OpenAPI completion, and full module test suites.
+7. Implement security hardening, queues, backups/monitoring, OpenAPI completion, and full module test suites.
 
 ## 12. Backend Definition of Done
 
@@ -495,7 +438,6 @@ Security schemes to document:
 - The unique vote constraint and transaction prevent duplicate votes under concurrency.
 - Only published articles/content are returned through public routes.
 - Publisher analytics are isolated to owned articles unless platform-wide permission is present.
-- API keys are scoped, hashed, expiring, rotatable, revocable, audited, and never exposed to browser clients.
 - OpenAPI 3.1 documentation, automated tests, logs/audits, error handling, and rate limits are complete.
 - Security review and acceptance tests demonstrate the SRS requirements.
 

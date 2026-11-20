@@ -47,7 +47,7 @@ backend/app/Modules/Articles/
 │   │   ├── Public/{PublicArticleController,PublicCategoryController}.php
 │   │   ├── Publisher/PublisherArticleController.php
 │   │   └── Admin/AdminArticleController.php
-│   ├── Requests/{StoreArticleDraftRequest,UpdateArticleRequest,RejectArticleRequest,FeatureArticleRequest}.php
+│   ├── Requests/{StoreArticleDraftRequest,UpdateArticleRequest,FeatureArticleRequest}.php
 │   └── Resources/{ArticleListResource,ArticleDetailResource,ArticleCategoryResource}.php
 ├── Models/{Article,ArticleCategory,ArticleAttachment,ArticleStatusHistory}.php
 ├── Policies/ArticlePolicy.php
@@ -63,37 +63,24 @@ Registered in `bootstrap/providers.php`; routes are mounted from `routes/api.php
 ## 3. Editorial state machine
 
 ```text
-                 submit (article.submit)
-      ┌──────────────────────────────────┐
-      │                                  ▼
-   ┌──────┐   submit    ┌────────────────┐   approve   ┌─────────┐
-   │draft │────────────▶│ pending_review │───────────▶│ approved │
-   └──────┘             └────────────────┘            └─────────┘
-      ▲  ▲                     │ reject                   │
-      │  └─────────────────────┼──────────────────────────┘
-      │       resubmit         ▼            publish (article.publish_any)
-      │                  ┌──────────┐                      │
-      └──────────────────│ rejected │                      ▼
-                         └──────────┘                ┌───────────┐
-                                                      │ published │
-                                                      └───────────┘
-                                                            │ unpublish (article.unpublish)
-                                                            ▼
-                                                     ┌─────────────┐
-                                                     │ unpublished │
-                                                     └─────────────┘
+   ┌───────┐   publish (article.publish_own)   ┌───────────┐
+   │ draft │──────────────────────────────────▶│ published │
+   └───────┘                                   └───────────┘
+                                                     │ ▲
+                       unpublish (article.unpublish) │ │ publish (article.publish_any)
+                                                     ▼ │
+                                               ┌─────────────┐
+                                               │ unpublished │
+                                               └─────────────┘
 ```
 
 Allowed transitions (enforced in `ArticleWorkflowService::TRANSITIONS`):
 
 | From | To |
 |---|---|
-| `draft` | `draft` (edit), `pending_review`, `published` (direct publish) |
-| `pending_review` | `approved`, `rejected` |
-| `approved` | `published` |
-| `rejected` | `draft`, `pending_review` |
-| `published` | `unpublished` |
-| `unpublished` | `published` |
+| `draft` | `draft` (edit), `published` (direct publish by publisher or admin) |
+| `published` | `unpublished` (admin removal only) |
+| `unpublished` | `published` (admin republish) |
 
 Any other transition raises `ArticleException::invalidTransition` → `409`
 with code `article_invalid_transition`. A refused transition writes **no**

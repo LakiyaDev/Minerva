@@ -22,6 +22,9 @@ const Register = lazy(() => import("../pages/Auth").then((m) => ({ default: m.Re
 const ForgotPassword = lazy(() =>
   import("../pages/Auth").then((m) => ({ default: m.ForgotPassword })),
 );
+const ResetPassword = lazy(() =>
+  import("../pages/Auth").then((m) => ({ default: m.ResetPassword })),
+);
 const Dashboard = lazy(() =>
   import("../pages/Participant").then((m) => ({ default: m.Dashboard })),
 );
@@ -60,6 +63,9 @@ const Participants = lazy(() =>
 );
 const AdminSettings = lazy(() =>
   import("../pages/Admin").then((m) => ({ default: m.AdminSettings })),
+);
+const AdminAuditLogs = lazy(() =>
+  import("../pages/Admin").then((m) => ({ default: m.AdminAuditLogs })),
 );
 
 function RoleShell({ requiredRole }: { requiredRole: "participant" | "publisher" | "admin" }) {
@@ -106,6 +112,8 @@ export const router = createBrowserRouter([
   { path: "/auth/callback", Component: AuthCallback },
   { path: "/register", Component: Register },
   { path: "/forgot-password", Component: ForgotPassword },
+  { path: "/staff/reset-password", Component: ResetPassword },
+  { path: "/reset-password", Component: ResetPassword },
   {
     Component: () => <RoleShell requiredRole="participant" />,
     children: [
@@ -134,6 +142,7 @@ export const router = createBrowserRouter([
       { path: "/admin/voting", Component: VotingManagement },
       { path: "/admin/results", Component: Results },
       { path: "/admin/participants", Component: Participants },
+      { path: "/admin/audit-logs", Component: AdminAuditLogs },
       { path: "/admin/settings", Component: AdminSettings },
     ],
   },

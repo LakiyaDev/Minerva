@@ -19,9 +19,6 @@ it('lists only published articles in the public catalogue', function (): void {
     ]);
 
     Article::factory()->withStatus(ArticleStatus::Draft)->create();
-    Article::factory()->withStatus(ArticleStatus::PendingReview)->create();
-    Article::factory()->withStatus(ArticleStatus::Approved)->create();
-    Article::factory()->withStatus(ArticleStatus::Rejected)->create();
     Article::factory()->withStatus(ArticleStatus::Unpublished)->create();
 
     $this->getJson('/api/v1/articles')

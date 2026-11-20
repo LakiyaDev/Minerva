@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Modules\Analytics\Providers\AnalyticsServiceProvider;
 use App\Modules\Articles\Providers\ArticlesServiceProvider;
 use App\Modules\Audit\Providers\AuditServiceProvider;
 use App\Modules\Comments\Providers\CommentsServiceProvider;
@@ -16,4 +17,5 @@ return [
     ArticlesServiceProvider::class,
     CommentsServiceProvider::class,
     VotingServiceProvider::class,
+    AnalyticsServiceProvider::class,
 ];

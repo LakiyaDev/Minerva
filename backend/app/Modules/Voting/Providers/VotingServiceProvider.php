@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Modules\Voting\Providers;
 
-use App\Modules\Identity\Models\User;
 use App\Modules\Voting\Models\Vote;
 use App\Modules\Voting\Policies\VotePolicy;
 use App\Modules\Voting\Services\VotingPeriodService;
@@ -12,7 +11,6 @@ use App\Modules\Voting\Services\VotingQueryService;
 use App\Modules\Voting\Services\VotingTransactionService;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -31,12 +29,6 @@ final class VotingServiceProvider extends ServiceProvider
         $this->loadMigrationsFrom(__DIR__.'/../Database/Migrations');
 
         Gate::policy(Vote::class, VotePolicy::class);
-
-        Broadcast::channel(
-            'voting-results.{periodId}',
-            fn (User $user, string $periodId): bool => $user->isActive()
-                && $user->hasPermission('participant.view_results'),
-        );
 
         $this->registerRateLimiters();
     }

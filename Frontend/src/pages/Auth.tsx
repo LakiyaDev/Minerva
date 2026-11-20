@@ -9,6 +9,7 @@ import {
   confirmStaffMfaSetup,
   forgotStaffPassword,
   getGoogleRedirectUrl,
+  resetStaffPassword,
   staffLogin,
   verifyStaffMfa,
   type MeDto,
@@ -704,6 +705,155 @@ export function ForgotPassword() {
               </label>
               <button className="btn full" disabled={loading}>
                 {loading ? "sending…" : "send reset link"} <ArrowRight />
+              </button>
+            </form>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export function ResetPassword() {
+  const [searchParams] = useSearchParams();
+  const initialToken = searchParams.get("token") ?? "";
+  const initialEmail = searchParams.get("email") ?? "";
+
+  const [token, setToken] = useState(initialToken);
+  const [email, setEmail] = useState(initialEmail);
+  const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setFieldErrors({});
+
+    try {
+      await resetStaffPassword({
+        token: token.trim(),
+        email: email.trim(),
+        password,
+        password_confirmation: passwordConfirmation,
+      });
+      setDone(true);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setFieldErrors(err.errors);
+        setError(err.message);
+      } else {
+        setError(authErrorMessage(err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-page">
+      <AuthVisual />
+      <main className="auth-form">
+        <Link to="/login" className="back">
+          <ArrowLeft /> return to sign in
+        </Link>
+        {done ? (
+          <div className="sent-state">
+            <span>
+              <Check />
+            </span>
+            <h1>Password updated.</h1>
+            <p>Your staff password has been reset and previous sessions were signed out.</p>
+            <Link className="btn" to="/login">
+              sign in with new password <ArrowRight />
+            </Link>
+          </div>
+        ) : (
+          <>
+            <div>
+              <span className="eyebrow">restore staff access.</span>
+              <h1>
+                Choose a new
+                <br />
+                <em>password.</em>
+              </h1>
+              <p>Enter a strong new password for your Minerva staff account.</p>
+            </div>
+            {error && (
+              <p className="field-error" role="alert">
+                {error}
+              </p>
+            )}
+            <form onSubmit={(e) => void handleSubmit(e)}>
+              {!initialToken && (
+                <label>
+                  Reset token
+                  <input
+                    required
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder="Paste reset token"
+                  />
+                  {fieldErrors.token && (
+                    <small className="field-error">{fieldErrors.token[0]}</small>
+                  )}
+                </label>
+              )}
+              <label>
+                Email address
+                <input
+                  required
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@university.edu"
+                  readOnly={Boolean(initialEmail)}
+                />
+                {fieldErrors.email && (
+                  <small className="field-error">{fieldErrors.email[0]}</small>
+                )}
+              </label>
+              <label>
+                New password
+                <div className="pw-input">
+                  <input
+                    required
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Minimum 12 characters"
+                    minLength={12}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((s) => !s)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                {fieldErrors.password && (
+                  <small className="field-error">{fieldErrors.password[0]}</small>
+                )}
+              </label>
+              <label>
+                Confirm new password
+                <input
+                  required
+                  type={showPassword ? "text" : "password"}
+                  value={passwordConfirmation}
+                  onChange={(e) => setPasswordConfirmation(e.target.value)}
+                  placeholder="Repeat new password"
+                  minLength={12}
+                />
+              </label>
+              <button className="btn full" disabled={loading}>
+                {loading ? "resetting…" : "reset password"} <ArrowRight />
               </button>
             </form>
           </>

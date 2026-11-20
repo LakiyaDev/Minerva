@@ -19,4 +19,6 @@ Route::prefix('v1')->group(function (): void {
     require app_path('Modules/Articles/Routes/api.php');
     require app_path('Modules/Comments/Routes/api.php');
     require app_path('Modules/Voting/Routes/api.php');
+    require app_path('Modules/Analytics/Routes/api.php');
+    require app_path('Modules/Audit/Routes/api.php');
 });
