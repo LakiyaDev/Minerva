@@ -8,8 +8,8 @@ use App\Modules\Identity\Events\UserDeactivated;
 use App\Modules\Identity\Exceptions\IdentityException;
 use App\Modules\Identity\Models\User;
 use App\Shared\Contracts\AuditLogger;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 final class UserManagementService
 {
@@ -20,6 +20,10 @@ final class UserManagementService
 
     public function setActive(User $target, bool $active, User $actor, Request $request): User
     {
+        if (! $actor->hasPermission('user.manage')) {
+            throw new AuthorizationException('You do not have the required permission.');
+        }
+
         if (! $active && $actor->is($target)) {
             throw IdentityException::conflict('You cannot deactivate your own account.');
         }
@@ -49,6 +53,10 @@ final class UserManagementService
 
     private function guardLastAdministrator(User $target): void
     {
+        if (! (bool) config('identity.staff.protect_last_administrator', true)) {
+            return;
+        }
+
         if (! $target->hasRole('administrator') || ! $target->isActive()) {
             return;
         }

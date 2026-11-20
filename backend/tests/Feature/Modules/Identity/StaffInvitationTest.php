@@ -90,13 +90,50 @@ it('rejects an expired invitation', function (): void {
     );
 });
 
-it('does not invite an existing account or an assignable non-staff role', function (): void {
+it('upgrades a Google-only reader to staff and keeps the participant role', function (): void {
+    Notification::fake();
+
     $admin = identityUser('administrator');
-    $existing = identityUser('participant', ['email' => 'existing@example.com']);
+    $reader = identityUser('participant', ['email' => 'reader@example.com']);
+
+    $service = app(StaffInvitationService::class);
+    $request = Request::create('/api/v1/admin/staff-invitations', 'POST');
+
+    $service->invite($admin, $reader->email, 'publisher', $request);
+
+    $token = null;
+
+    Notification::assertSentOnDemand(
+        StaffInvitationNotification::class,
+        function (StaffInvitationNotification $notification) use (&$token): bool {
+            $token = $notification->token;
+
+            return true;
+        },
+    );
+
+    $user = $service->accept(
+        $token,
+        'Reader Name',
+        'Password!2345',
+        Request::create('/api/v1/auth/staff/invitations/accept', 'POST'),
+    );
+
+    expect($user->getKey())->toBe($reader->getKey())
+        ->and($user->fresh()->hasPasswordCredential())->toBeTrue()
+        ->and($user->fresh()->hasRole('participant'))->toBeTrue()
+        ->and($user->fresh()->hasRole('publisher'))->toBeTrue();
+
+    expect(User::query()->where('email', 'reader@example.com')->count())->toBe(1);
+});
+
+it('does not invite an existing staff account or an assignable non-staff role', function (): void {
+    $admin = identityUser('administrator');
+    $existingStaff = identityUser('publisher', ['email' => 'existing@example.com']);
     $service = app(StaffInvitationService::class);
     $request = Request::create('/');
 
-    expect(fn () => $service->invite($admin, $existing->email, 'publisher', $request))
+    expect(fn () => $service->invite($admin, $existingStaff->email, 'publisher', $request))
         ->toThrow(App\Modules\Identity\Exceptions\IdentityException::class);
 
     expect(fn () => $service->invite($admin, 'fresh@example.com', 'participant', $request))

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 use App\Modules\Identity\Exceptions\IdentityException;
 use App\Modules\Identity\Models\OAuthAccount;
+use App\Modules\Identity\Models\Role;
 use App\Modules\Identity\Models\User;
 use App\Modules\Identity\Services\GoogleAuthenticationService;
 use App\Modules\Identity\Services\OAuthStateService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Socialite;
+use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\GoogleProvider;
 use Laravel\Socialite\Two\User as GoogleUser;
 
 function verifiedGoogleUser(string $email = 'reader@example.com', string $id = 'google-123'): GoogleUser
@@ -83,11 +85,32 @@ it('never lets Google sign-in bypass staff MFA', function (): void {
     );
 });
 
+it('never lets a linked Google identity bypass MFA after a staff upgrade', function (): void {
+    $service = app(GoogleAuthenticationService::class);
+
+    $reader = $service->authenticate(verifiedGoogleUser(), Request::create('/'));
+
+    // Simulate the invitation upgrade: the reader gains a staff role and a
+    // password while keeping the linked Google account.
+    $reader->forceFill(['password' => 'Password!2345'])->save();
+    $reader->roles()->attach(
+        Role::query()->where('name', 'publisher')->firstOrFail()->getKey()
+    );
+    $reader->flushPermissionCache();
+
+    try {
+        $service->authenticate(verifiedGoogleUser(), Request::create('/'));
+        $this->fail('Google sign-in must be refused for staff accounts.');
+    } catch (IdentityException $exception) {
+        expect($exception->errorCode())->toBe('staff_use_password');
+    }
+});
+
 it('completes the Google callback only with a valid single-use state', function (): void {
     $states = app(OAuthStateService::class);
     $state = $states->issue();
 
-    $provider = Mockery::mock(Laravel\Socialite\Two\GoogleProvider::class);
+    $provider = Mockery::mock(GoogleProvider::class);
     $provider->shouldReceive('stateless')->andReturnSelf();
     $provider->shouldReceive('user')->andReturn(verifiedGoogleUser());
 

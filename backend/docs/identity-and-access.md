@@ -78,7 +78,7 @@ backend/
 │   │   │   │   ├── Middleware/
 │   │   │   │   │   ├── EnsureUserIsActive.php
 │   │   │   │   │   └── RequireStaffTwoFactor.php
-│   │   │   │   ├── Requests/        (15 validated form requests)
+│   │   │   │   ├── Requests/        (16 validated form requests)
 │   │   │   │   └── Resources/       Me, User, AdminUser, Role, StaffInvitation
 │   │   │   ├── Models/
 │   │   │   │   ├── User.php
@@ -112,7 +112,7 @@ backend/
 │   │   │   │   ├── IdentityAccessService.php
 │   │   │   │   ├── UserManagementService.php
 │   │   │   │   └── ProfileService.php
-│   │   │   └── Support/ (reserved for module helpers)
+│   │   │   └── Routes/api.php
 │   │   └── Audit/
 │   │       ├── Database/Migrations/..._create_audit_logs_table.php
 │   │       ├── Models/AuditLog.php
@@ -143,6 +143,7 @@ backend/
 │   │   ├── StaffAuthenticationTest.php
 │   │   ├── RbacTest.php
 │   │   └── StaffInvitationTest.php
+│   ├── Unit/Shared/EmailNormalizerTest.php
 │   ├── Pest.php
 │   └── TestCase.php
 ├── composer.json
@@ -277,8 +278,14 @@ invalidated after every role/grant mutation.
 - Administrators cannot change their own roles or direct permissions.
 - Only an administrator can grant/revoke `administrator`.
 - The last active administrator cannot be demoted or deactivated.
+- Staff roles (`publisher`, `administrator`) require a password credential, so a
+  Google-only reader cannot be promoted into a staff role without first going
+  through the invitation flow.
+- Removing the `publisher` role also retires its active publisher grant, so a
+  dormant direct-publish capability cannot be revived by re-assigning the role.
 - Sensitive permissions (`user.manage`, `publisher.manage`, `settings.manage`,
-  `audit.view`, `article.publish_any`) cannot be granted directly — role only.
+  `audit.view`, `article.publish_own`, `article.publish_any`) cannot be granted
+  directly — role only.
 - Revoking a publisher grant removes the `publisher` role and all publisher
   permissions.
 - Every change is audited with actor, subject, timestamp and hashed IP.
@@ -314,9 +321,14 @@ Rules:
 
 - Google sign-in is **readers only**. If the email belongs to a password-bearing
   staff account, the callback fails with `staff_use_password`.
+- The refusal is enforced twice: at email lookup and through a linked
+  `oauth_accounts` row. A reader upgraded to staff while keeping their Google
+  identity therefore cannot use Google to sign back in.
 - Inactive accounts fail with `account_inactive`.
 - Replays of the state fail with `invalid_state`.
 - Linking by email only happens for accounts without a password (readers).
+- Staff login challenges are issued only for staff accounts and are single-use,
+  short-lived, and burnt after a number of failures (`LoginChallengeService`).
 
 ### 6.2 Staff — first login (TOTP enrolment)
 
@@ -360,8 +372,10 @@ POST /auth/staff/mfa/verify {token, code | recovery_code}
    `POST /auth/staff/invitations/accept {token, name, password}`.
 5. Password policy: min 12, mixed case, number, symbol, and (in production)
    HaveIBeenPwned `uncompromised` check.
-6. Account is created with the invited role, session is established, and the
-   staff member still has to enrol TOTP before admin routes unlock.
+6. The account is created with the invited role (or, when the email belongs to
+   an existing Google-only reader, that account is upgraded in place and keeps
+   its `participant` role), the session is established, and the staff member
+   still has to enrol TOTP before admin routes unlock.
 
 ### 6.5 Password reset (staff only)
 
@@ -446,13 +460,17 @@ Full schemas: `openapi/openapi.yaml`.
 - `frontend_url` — post-OAuth / email link base.
 - `google.*` — scopes, state TTL, success/failure redirects.
 - `staff.*` — roles, MFA requirement, password policy, lockout, challenge TTL,
-  TOTP issuer/window, invitation TTL, allowed email domains, assignable roles.
+  TOTP issuer/window, invitation TTL, allowed email domains, assignable roles,
+  `protect_last_administrator`.
 - `publisher.direct_publish_permission`.
 - `cache.permission_ttl_seconds`.
-- `audit.hash_ip`.
 
 Every production setting is environment-driven; secrets only via `.env` or a
 secrets manager. Never commit `.env`.
+
+IP privacy: raw IPs are never written to `login_attempts` or `audit_logs`.
+`App\Shared\Support\IpHasher` stores only a keyed HMAC-SHA256 derived from
+`app.key`; there is no configuration switch to persist raw addresses.
 
 ---
 

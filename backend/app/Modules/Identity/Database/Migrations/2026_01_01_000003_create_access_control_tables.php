@@ -69,18 +69,17 @@ return new class extends Migration
         });
 
         // At most one *active* grant per user. MySQL cannot express a partial
-        // unique index directly, so a generated column maps active rows to the
+        // unique index directly, so a functional index maps active rows to the
         // user id and inactive rows to NULL (NULLs are not unique-collisions).
+        //
+        // A stored generated column cannot be used here: InnoDB refuses to add
+        // one to a table that carries foreign keys alongside a composite index
+        // on the referenced columns (MySQL error 1215). The functional index
+        // enforces the same constraint without a materialized column.
         if (DB::connection()->getDriverName() === 'mysql') {
             DB::statement(
-                'ALTER TABLE publisher_permissions '
-                .'ADD COLUMN active_user_id CHAR(26) '
-                .'GENERATED ALWAYS AS (IF(revoked_at IS NULL, user_id, NULL)) STORED'
-            );
-
-            DB::statement(
                 'CREATE UNIQUE INDEX publisher_permissions_one_active_per_user '
-                .'ON publisher_permissions (active_user_id)'
+                .'ON publisher_permissions ((IF(revoked_at IS NULL, user_id, NULL)))'
             );
         }
     }

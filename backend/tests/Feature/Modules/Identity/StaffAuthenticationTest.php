@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Modules\Identity\Exceptions\IdentityException;
 use App\Modules\Identity\Models\LoginAttempt;
-use App\Modules\Identity\Models\User;
 use App\Modules\Identity\Services\StaffAuthenticationService;
 use Illuminate\Http\Request;
 use PragmaRX\Google2FA\Google2FA;

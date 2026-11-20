@@ -7,6 +7,7 @@ namespace App\Modules\Identity\Services;
 use App\Modules\Identity\Events\RoleAssigned;
 use App\Modules\Identity\Events\RoleRevoked;
 use App\Modules\Identity\Exceptions\IdentityException;
+use App\Modules\Identity\Models\PublisherPermission;
 use App\Modules\Identity\Models\Role;
 use App\Modules\Identity\Models\User;
 use App\Shared\Contracts\AuditLogger;
@@ -65,7 +66,11 @@ final class RoleService
     {
         $this->guard($target, $actor);
 
-        if ($roleName === 'administrator' && $this->isLastActiveAdministrator($target)) {
+        if (
+            $roleName === 'administrator'
+            && (bool) config('identity.staff.protect_last_administrator', true)
+            && $this->isLastActiveAdministrator($target)
+        ) {
             throw IdentityException::lastAdministrator();
         }
 
@@ -75,8 +80,18 @@ final class RoleService
             throw IdentityException::roleNotAssignable($roleName);
         }
 
-        DB::transaction(function () use ($target, $role): void {
+        DB::transaction(function () use ($target, $role, $roleName): void {
             $target->roles()->detach($role->getKey());
+
+            // Removing the publisher role must also retire any active
+            // publisher grant; otherwise re-assigning the role would silently
+            // restore `article.publish_own` without a fresh authorization.
+            if ($roleName === 'publisher') {
+                PublisherPermission::query()
+                    ->where('user_id', $target->getKey())
+                    ->whereNull('revoked_at')
+                    ->update(['revoked_at' => now()]);
+            }
         });
 
         $target->flushPermissionCache();

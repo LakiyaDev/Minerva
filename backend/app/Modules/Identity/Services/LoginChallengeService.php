@@ -27,12 +27,14 @@ final class LoginChallengeService
     public function issue(User $user, string $purpose): string
     {
         $token = Str::random(64);
+        $ttl = (int) config('identity.staff.challenge_ttl_seconds', 300);
 
         $this->cache->put($this->key($token), [
             'user_id' => $user->getKey(),
             'purpose' => $purpose,
             'attempts' => 0,
-        ], now()->addSeconds((int) config('identity.staff.challenge_ttl_seconds', 300)));
+            'expires_at' => now()->addSeconds($ttl)->getTimestamp(),
+        ], now()->addSeconds($ttl));
 
         return $token;
     }
@@ -45,9 +47,15 @@ final class LoginChallengeService
             return null;
         }
 
+        $expiresAt = (int) ($payload['expires_at'] ?? 0);
+
+        if ($expiresAt > 0 && $expiresAt < now()->getTimestamp()) {
+            return null;
+        }
+
         $user = User::query()->find($payload['user_id'] ?? null);
 
-        if ($user === null || ! $user->isActive()) {
+        if ($user === null || ! $user->isActive() || ! $user->isStaff()) {
             return null;
         }
 
@@ -70,7 +78,9 @@ final class LoginChallengeService
         $attempts = (int) ($payload['attempts'] ?? 0) + 1;
         $max = (int) config('identity.staff.challenge_max_attempts', 5);
 
-        if ($attempts >= $max) {
+        $remaining = (int) ($payload['expires_at'] ?? 0) - now()->getTimestamp();
+
+        if ($remaining <= 0 || $attempts >= $max) {
             $this->cache->forget($key);
 
             return false;
@@ -78,12 +88,9 @@ final class LoginChallengeService
 
         $payload['attempts'] = $attempts;
 
-        // Preserve the remaining TTL as closely as the cache store allows.
-        $this->cache->put(
-            $key,
-            $payload,
-            now()->addSeconds((int) config('identity.staff.challenge_ttl_seconds', 300)),
-        );
+        // Do not extend the challenge lifetime on failure: reuse the time left
+        // on the original issue window.
+        $this->cache->put($key, $payload, now()->addSeconds($remaining));
 
         return true;
     }

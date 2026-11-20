@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Modules\Identity\Http\Middleware\EnsureUserIsActive;
 use App\Modules\Identity\Http\Middleware\RequireStaffTwoFactor;
 use App\Shared\Exceptions\ApiExceptionRenderer;
@@ -24,6 +26,15 @@ return Application::configure(basePath: dirname(__DIR__))
         // Sanctum: allow the first-party SPA origins in SANCTUM_STATEFUL_DOMAINS
         // to authenticate with the secure HttpOnly session cookie.
         $middleware->statefulApi();
+
+        // This API has no guest page to redirect to. Laravel defaults to
+        // route('login'), which does not exist here and turned every
+        // unauthenticated request into a 500. Unauthenticated API calls must
+        // resolve to a 401 JSON envelope instead.
+        $middleware->redirectGuestsTo(fn (): ?string => null);
+
+        // Trusted proxies are configured in AppServiceProvider::boot() — the
+        // withMiddleware callback runs before the config repository exists.
 
         $middleware->append(RequestId::class);
         $middleware->append(ForceHttps::class);

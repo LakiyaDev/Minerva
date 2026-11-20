@@ -59,7 +59,9 @@ paths:
         Validates the single-use state, exchanges the authorization code, requires a
         Google-verified email, provisions or links a participant account and establishes
         a session. The browser is redirected to the SPA with `auth=success` or
-        `auth=error&reason=<safe_code>`.
+        `auth=error&reason=<safe_code>`. Accounts that hold a password or a staff
+        role (including a reader upgraded to staff via invitation) are refused with
+        `reason=staff_use_password` — staff must use password + TOTP, never Google.
       security: []
       parameters:
         - name: code
