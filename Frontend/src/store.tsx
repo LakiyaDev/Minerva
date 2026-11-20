@@ -35,7 +35,8 @@ import {
   type VoteRecordDto,
   type VotingStatusDto,
 } from "./services/votingService";
-import { getMe, logoutSession, type MeDto } from "./services/authService";
+import { getMe, logoutSession, updateProfileName, type MeDto } from "./services/authService";
+import { getMyComments, type CommentDto } from "./services/commentService";
 import { ApiError, ApiUnavailableError } from "./services/apiClient";
 
 export type Role = "guest" | "participant" | "publisher" | "admin";
@@ -70,8 +71,11 @@ type Store = {
   refreshCategories: () => Promise<void>;
   votingStatus: VotingStatusDto | null;
   voteRecords: VoteRecordDto[];
+  myComments: CommentDto[];
   refreshVotingStatus: () => Promise<void>;
   refreshMyVotes: () => Promise<void>;
+  refreshMyComments: () => Promise<void>;
+  updateProfile: (name: string) => Promise<{ ok: boolean; message?: string }>;
   voted: string[];
   authOpen: boolean;
   setAuthOpen: (open: boolean) => void;
@@ -196,6 +200,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [votingStatus, setVotingStatus] = useState<VotingStatusDto | null>(null);
   const votingOpenRef = useRef(false);
   const [voteRecords, setVoteRecords] = useState<VoteRecordDto[]>([]);
+  const [myComments, setMyComments] = useState<CommentDto[]>([]);
   const [voted, setVoted] = useState<string[]>([]);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingVote, setPendingVote] = useState<string | null>(null);
@@ -254,6 +259,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRoleState("guest");
     setVoted([]);
     setVoteRecords([]);
+    setMyComments([]);
     localStorage.removeItem("minerva-role");
   }, []);
 
@@ -311,6 +317,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Unauthenticated or unreachable sessions keep an empty vote cache.
     }
   }, []);
+
+  const refreshMyComments = useCallback(async () => {
+    try {
+      const res = await getMyComments(1);
+      setMyComments(res.data);
+    } catch {
+      // Unauthenticated or unreachable sessions keep an empty comment cache.
+    }
+  }, []);
+
+  const updateProfile = useCallback(
+    async (name: string): Promise<{ ok: boolean; message?: string }> => {
+      try {
+        const updated = await updateProfileName(name);
+        setAuthenticatedUser(updated);
+        return { ok: true };
+      } catch (error) {
+        if (error instanceof ApiError) {
+          return { ok: false, message: error.message };
+        }
+        return { ok: false, message: "Unable to update profile." };
+      }
+    },
+    [setAuthenticatedUser],
+  );
 
   const castVote = useCallback(
     async (id: string): Promise<CastVoteOutcome> => {
@@ -409,11 +440,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (role === "guest") {
       setVoted([]);
       setVoteRecords([]);
+      setMyComments([]);
       return;
     }
 
     void refreshMyVotes();
-  }, [role, refreshMyVotes]);
+    void refreshMyComments();
+  }, [role, refreshMyVotes, refreshMyComments]);
 
   /** Applies a workflow response to the locally cached list. */
   const applyArticle = useCallback((dto: ArticleDetailDto) => {
@@ -539,8 +572,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshCategories,
       votingStatus,
       voteRecords,
+      myComments,
       refreshVotingStatus,
       refreshMyVotes,
+      refreshMyComments,
+      updateProfile,
       voted,
       authOpen,
       setAuthOpen,
@@ -585,8 +621,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshCategories,
       votingStatus,
       voteRecords,
+      myComments,
       refreshVotingStatus,
       refreshMyVotes,
+      refreshMyComments,
+      updateProfile,
       voted,
       authOpen,
       pendingVote,

@@ -119,3 +119,18 @@ export async function forgotStaffPassword(email: string): Promise<void> {
 export async function logoutSession(): Promise<void> {
   await apiRequest<{ message?: string }>("/auth/logout", { method: "POST" });
 }
+
+export async function updateProfileName(name: string): Promise<MeDto> {
+  const response = await apiRequest<{ data: MeDto }>("/me", {
+    method: "PATCH",
+    body: { name },
+  });
+  return response.data;
+}
+
+export async function revokeOtherSessions(): Promise<{ revoked_sessions: number }> {
+  const response = await apiRequest<{ data: { revoked_sessions: number } }>("/me/sessions", {
+    method: "DELETE",
+  });
+  return response.data;
+}
