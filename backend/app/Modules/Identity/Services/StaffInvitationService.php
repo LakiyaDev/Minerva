@@ -39,7 +39,14 @@ final class StaffInvitationService
             throw IdentityException::roleNotAssignable($role);
         }
 
-        if (User::query()->where('email', $email)->exists()) {
+        $existing = User::withTrashed()->where('email', $email)->first();
+
+        // A reader account may be upgraded to staff (keeping the participant
+        // role); a password-bearing or staff account must not be re-invited.
+        if (
+            $existing !== null
+            && ($existing->trashed() || $existing->hasPasswordCredential() || $existing->isStaff())
+        ) {
             throw IdentityException::conflict('An account already exists for this email address.');
         }
 
@@ -95,30 +102,60 @@ final class StaffInvitationService
                 throw IdentityException::invalidInvitation();
             }
 
-            if (User::query()->where('email', $locked->email)->exists()) {
+            $existing = User::withTrashed()
+                ->where('email', $locked->email)
+                ->lockForUpdate()
+                ->first();
+
+            if (
+                $existing !== null
+                && ($existing->trashed() || $existing->hasPasswordCredential() || $existing->isStaff())
+            ) {
                 throw IdentityException::conflict('An account already exists for this email address.');
             }
 
-            $user = User::query()->create([
-                'name' => $name,
-                'email' => $locked->email,
-                'password' => $password,
-                'email_verified_at' => now(),
-                'is_active' => true,
-            ]);
+            $created = $existing === null;
+
+            if ($created) {
+                $user = User::query()->create([
+                    'name' => $name,
+                    'email' => $locked->email,
+                    'password' => $password,
+                    'email_verified_at' => now(),
+                    'is_active' => true,
+                ]);
+            } else {
+                // Upgrade a Google-only reader: keep the account (and its
+                // participant role) but add the staff credential.
+                $existing->forceFill([
+                    'name' => $name,
+                    'password' => $password,
+                    'email_verified_at' => $existing->email_verified_at ?? now(),
+                    'is_active' => true,
+                    'failed_login_attempts' => 0,
+                    'locked_until' => null,
+                    'remember_token' => Str::random(60),
+                ])->save();
+
+                $user = $existing;
+            }
 
             $role = Role::query()->where('name', $locked->role)->firstOrFail();
 
-            $user->roles()->attach($role->getKey(), [
-                'assigned_by' => $locked->invited_by,
+            $user->roles()->syncWithoutDetaching([
+                $role->getKey() => ['assigned_by' => $locked->invited_by],
             ]);
 
             $locked->forceFill(['accepted_at' => now()])->save();
 
-            UserRegistered::dispatch($user);
+            if ($created) {
+                UserRegistered::dispatch($user);
+            }
 
             return $user;
         });
+
+        $user->flushPermissionCache();
 
         $this->audit->record('auth.staff.invitation_accepted', $user, $user, [
             'role' => $invitation->role,

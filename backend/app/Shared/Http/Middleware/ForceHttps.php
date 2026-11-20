@@ -12,7 +12,7 @@ final class ForceHttps
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (app()->isProduction() && ! $request->isSecure()) {
+        if (app()->isProduction() && ! $request->isSecure() && ! $request->is('up')) {
             return redirect()->secure($request->getRequestUri(), 308);
         }
 

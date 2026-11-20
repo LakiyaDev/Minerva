@@ -30,6 +30,10 @@ return [
         ),
     ],
 
+    // Comma-separated proxy IPs/CIDRs, or "*" when the app is behind a trusted
+    // load balancer that terminates TLS. Required for correct HTTPS detection.
+    'trusted_proxies' => env('TRUSTED_PROXIES'),
+
     'maintenance' => [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
         'store' => env('APP_MAINTENANCE_STORE', 'database'),

@@ -28,8 +28,10 @@ final class GoogleCallbackController
             return $this->failure('invalid_state');
         }
 
-        if ($request->filled('error')) {
-            return $this->failure($request->string('error')->toString() === 'access_denied' ? 'access_denied' : 'google_error');
+        $error = $request->query('error');
+
+        if (is_string($error) && $error !== '') {
+            return $this->failure($error === 'access_denied' ? 'access_denied' : 'google_error');
         }
 
         if (! $request->filled('code')) {

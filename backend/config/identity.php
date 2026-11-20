@@ -65,7 +65,7 @@ return [
         'assignable_roles' => ['participant', 'publisher', 'administrator'],
 
         // Protects the last administrator account from accidental lockout.
-        'protect_last_administrator' => true,
+        'protect_last_administrator' => (bool) env('STAFF_PROTECT_LAST_ADMIN', true),
     ],
 
     /*
@@ -87,16 +87,6 @@ return [
     'cache' => [
         'permission_ttl_seconds' => (int) env('PERMISSION_CACHE_TTL', 300),
         'prefix' => 'identity',
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Audit / privacy
-    |--------------------------------------------------------------------------
-    */
-    'audit' => [
-        // Raw IP addresses are never stored; only a keyed hash is retained.
-        'hash_ip' => true,
     ],
 
 ];

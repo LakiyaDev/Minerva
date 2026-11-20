@@ -51,10 +51,27 @@ final class GoogleAuthenticationService
                     'avatar_url' => $googleUser->getAvatar(),
                 ])->save();
 
-                return $account->user;
+                $user = $account->user()->withTrashed()->first();
+
+                if ($user === null || $user->trashed()) {
+                    throw IdentityException::accountInactive();
+                }
+
+                // A reader can be upgraded to staff (invitation flow) while
+                // keeping the linked Google identity. That link must not become
+                // an MFA bypass, so the staff check is repeated here.
+                if ($user->hasPasswordCredential() || $user->isStaff()) {
+                    throw IdentityException::googleStaffAccount();
+                }
+
+                return $user;
             }
 
-            $user = User::query()->where('email', $email)->lockForUpdate()->first();
+            $user = User::withTrashed()->where('email', $email)->lockForUpdate()->first();
+
+            if ($user !== null && $user->trashed()) {
+                throw IdentityException::accountInactive();
+            }
 
             if ($user !== null && ($user->hasPasswordCredential() || $user->isStaff())) {
                 // Never let Google sign-in bypass staff MFA. A staff role must

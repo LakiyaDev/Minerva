@@ -9,7 +9,6 @@ use App\Modules\Identity\Models\User;
 use App\Modules\Identity\Services\RoleService;
 use App\Shared\Http\Responses\ApiResponse;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 final class AdminUserRoleController
 {

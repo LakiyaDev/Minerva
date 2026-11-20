@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Modules\Identity\Exceptions\IdentityException;
 use App\Modules\Identity\Models\OAuthAccount;
+use App\Modules\Identity\Models\Role;
 use App\Modules\Identity\Models\User;
 use App\Modules\Identity\Services\GoogleAuthenticationService;
 use App\Modules\Identity\Services\OAuthStateService;
@@ -82,6 +83,27 @@ it('never lets Google sign-in bypass staff MFA', function (): void {
         verifiedGoogleUser($staff->email),
         Request::create('/'),
     );
+});
+
+it('never lets a linked Google identity bypass MFA after a staff upgrade', function (): void {
+    $service = app(GoogleAuthenticationService::class);
+
+    $reader = $service->authenticate(verifiedGoogleUser(), Request::create('/'));
+
+    // Simulate the invitation upgrade: the reader gains a staff role and a
+    // password while keeping the linked Google account.
+    $reader->forceFill(['password' => 'Password!2345'])->save();
+    $reader->roles()->attach(
+        Role::query()->where('name', 'publisher')->firstOrFail()->getKey()
+    );
+    $reader->flushPermissionCache();
+
+    try {
+        $service->authenticate(verifiedGoogleUser(), Request::create('/'));
+        $this->fail('Google sign-in must be refused for staff accounts.');
+    } catch (IdentityException $exception) {
+        expect($exception->errorCode())->toBe('staff_use_password');
+    }
 });
 
 it('completes the Google callback only with a valid single-use state', function (): void {

@@ -47,7 +47,15 @@ final class StaffMfaSetupController
             throw IdentityException::invalidMfaChallenge();
         }
 
-        $recoveryCodes = $twoFactor->confirmSetup($user, (string) $request->string('code'), $request);
+        try {
+            $recoveryCodes = $twoFactor->confirmSetup($user, (string) $request->string('code'), $request);
+        } catch (IdentityException $exception) {
+            if ($exception->errorCode() === 'mfa_code_invalid' && ! $challenges->registerFailure($token)) {
+                throw IdentityException::invalidMfaChallenge();
+            }
+
+            throw $exception;
+        }
 
         $challenges->consume($token);
 
