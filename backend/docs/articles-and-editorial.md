@@ -47,7 +47,7 @@ backend/app/Modules/Articles/
 │   │   ├── Public/{PublicArticleController,PublicCategoryController}.php
 │   │   ├── Publisher/PublisherArticleController.php
 │   │   └── Admin/AdminArticleController.php
-│   ├── Requests/{StoreArticleDraftRequest,UpdateArticleRequest,RejectArticleRequest,FeatureArticleRequest}.php
+│   ├── Requests/{StoreArticleDraftRequest,UpdateArticleRequest,FeatureArticleRequest}.php
 │   └── Resources/{ArticleListResource,ArticleDetailResource,ArticleCategoryResource}.php
 ├── Models/{Article,ArticleCategory,ArticleAttachment,ArticleStatusHistory}.php
 ├── Policies/ArticlePolicy.php

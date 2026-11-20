@@ -17,7 +17,6 @@ final class DatabaseSeeder extends Seeder
             RolePermissionSeeder::class,
             UniversitySeeder::class,
             ArticleCategorySeeder::class,
-            PlatformSettingSeeder::class,
         ]);
     }
 }
