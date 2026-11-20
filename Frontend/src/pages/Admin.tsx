@@ -54,6 +54,11 @@ import {
   getAdminAnalytics,
   type AdminAnalyticsDto,
 } from "../services/analyticsService";
+import {
+  getAdminAuditLogs,
+  type AuditLogDto,
+  type PaginatedAuditLogs,
+} from "../services/auditService";
 
 function toDateTimeLocal(iso?: string): string {
   if (!iso) return "";
@@ -79,6 +84,7 @@ export function AdminOverview() {
   const { articles, votingStatus } = useApp();
   const [statistics, setStatistics] = useState<VotingStatisticsDto | null>(null);
   const [analytics, setAnalytics] = useState<AdminAnalyticsDto | null>(null);
+  const [recentLogs, setRecentLogs] = useState<AuditLogDto[]>([]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -96,6 +102,14 @@ export function AdminOverview() {
       })
       .catch(() => {
         // Keep fallback if analytics API is unavailable.
+      });
+
+    getAdminAuditLogs({ per_page: 5 }, controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setRecentLogs(data.data);
+      })
+      .catch(() => {
+        // Keep empty logs if unauthorized or unreachable.
       });
 
     return () => controller.abort();
@@ -321,11 +335,63 @@ export function AdminOverview() {
         </section>
       </div>
       <section className="admin-activity">
-        <header>
-          <span className="eyebrow">recent activity.</span>
-          <h2>What changed today</h2>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <span className="eyebrow">recent activity.</span>
+            <h2>What changed today</h2>
+          </div>
+          <Link
+            to="/admin/audit-logs"
+            className="btn outline"
+            style={{ fontSize: "0.82rem", padding: "0.35rem 0.75rem" }}
+          >
+            view audit trail →
+          </Link>
         </header>
-        <p className="empty-state-copy">No recent activity.</p>
+        {recentLogs.length > 0 ? (
+          <div style={{ display: "grid", gap: "0.6rem", marginTop: "1rem" }}>
+            {recentLogs.map((log) => (
+              <div
+                key={log.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "0.75rem 1rem",
+                  background: "#fff",
+                  border: "1px solid #e4dcc9",
+                  borderRadius: "6px",
+                  fontSize: "0.88rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                  <code
+                    style={{
+                      fontSize: "0.78rem",
+                      background: "rgba(138,109,59,0.1)",
+                      color: "#8a6d3b",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                    }}
+                  >
+                    {log.action}
+                  </code>
+                  <span>
+                    {log.actor?.name ? <strong>{log.actor.name}</strong> : <span style={{ opacity: 0.6 }}>System</span>}
+                    {log.subject_type && (
+                      <span style={{ opacity: 0.7, marginLeft: "0.4rem" }}>
+                        · {log.subject_type.split("\\").pop()} {log.subject_id ? `#${log.subject_id.slice(0, 8)}` : ""}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <small style={{ color: "#6b705c" }}>{formatDateTime(log.created_at)}</small>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-state-copy">No recent platform activity recorded.</p>
+        )}
       </section>
     </div>
   );
@@ -1556,6 +1622,357 @@ export function AdminComments() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function AdminAuditLogs() {
+  const [logs, setLogs] = useState<AuditLogDto[]>([]);
+  const [meta, setMeta] = useState<PaginatedAuditLogs["meta"]>({
+    current_page: 1,
+    per_page: 25,
+    total: 0,
+  });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [actionCategory, setActionCategory] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [inspectingLog, setInspectingLog] = useState<AuditLogDto | null>(null);
+
+  const fetchLogs = useCallback(
+    async (targetPage: number) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await getAdminAuditLogs({
+          page: targetPage,
+          per_page: 25,
+          search: search.trim() || undefined,
+          action: actionCategory ? `${actionCategory}*` : undefined,
+        });
+        setLogs(res.data);
+        setMeta(res.meta);
+      } catch (err) {
+        setLogs([]);
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : err instanceof ApiUnavailableError
+              ? "The MINERVA API is unreachable."
+              : "Unable to load audit logs.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [search, actionCategory],
+  );
+
+  useEffect(() => {
+    void fetchLogs(page);
+  }, [fetchLogs, page]);
+
+  const categories = [
+    { label: "All actions", value: "" },
+    { label: "Articles", value: "article." },
+    { label: "Comments", value: "comment." },
+    { label: "Voting", value: "voting." },
+    { label: "Auth & Identity", value: "identity." },
+  ];
+
+  return (
+    <div className="admin-page">
+      <PageHead
+        eyebrow="governance & accountability."
+        title="Audit trail."
+      />
+
+      <div
+        className="table-tools"
+        style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}
+      >
+        <label style={{ flex: "1 1 280px" }}>
+          <Search />
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            placeholder="Search action, actor, or subject…"
+          />
+        </label>
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+          {categories.map((cat) => (
+            <button
+              key={cat.label}
+              type="button"
+              className={actionCategory === cat.value ? "btn" : "btn outline"}
+              style={{ fontSize: "0.82rem", padding: "0.35rem 0.75rem" }}
+              onClick={() => {
+                setActionCategory(cat.value);
+                setPage(1);
+              }}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <div className="error-banner" role="alert" style={{ margin: "1rem 0" }}>
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="data-table" style={{ marginTop: "1rem" }}>
+        <div
+          className="table-head"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "180px 220px 200px 180px 100px 1fr",
+            gap: "0.75rem",
+          }}
+        >
+          <span>Timestamp</span>
+          <span>Action</span>
+          <span>Actor</span>
+          <span>Subject</span>
+          <span>IP Hash</span>
+          <span style={{ textAlign: "right" }}>Inspect</span>
+        </div>
+
+        {loading ? (
+          <p className="empty-state-copy">Loading audit records…</p>
+        ) : logs.length === 0 ? (
+          <p className="empty-state-copy">No audit records match the selected filters.</p>
+        ) : (
+          logs.map((log) => (
+            <div
+              key={log.id}
+              className="table-row"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "180px 220px 200px 180px 100px 1fr",
+                gap: "0.75rem",
+                alignItems: "center",
+                padding: "0.85rem 1rem",
+              }}
+            >
+              <small style={{ color: "#6b705c" }}>{formatDateTime(log.created_at)}</small>
+              <div>
+                <code
+                  style={{
+                    fontSize: "0.78rem",
+                    background: "rgba(138, 109, 59, 0.12)",
+                    color: "#8a6d3b",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {log.action}
+                </code>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", fontSize: "0.85rem" }}>
+                <strong>{log.actor?.name || "System"}</strong>
+                {log.actor?.email && <small style={{ opacity: 0.7 }}>{log.actor.email}</small>}
+              </div>
+              <div style={{ fontSize: "0.82rem", opacity: 0.85 }}>
+                {log.subject_type ? (
+                  <span>
+                    {log.subject_type.split("\\").pop()}{" "}
+                    {log.subject_id ? `#${log.subject_id.slice(0, 8)}` : ""}
+                  </span>
+                ) : (
+                  <span style={{ opacity: 0.5 }}>—</span>
+                )}
+              </div>
+              <div>
+                {log.ip_hash ? (
+                  <code style={{ fontSize: "0.72rem", opacity: 0.7 }}>
+                    {log.ip_hash.slice(0, 8)}…
+                  </code>
+                ) : (
+                  <span style={{ opacity: 0.5 }}>—</span>
+                )}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <button
+                  type="button"
+                  className="btn outline"
+                  style={{ fontSize: "0.78rem", padding: "0.25rem 0.6rem" }}
+                  onClick={() => setInspectingLog(log)}
+                >
+                  <Eye size={13} /> view
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {meta.total > meta.per_page && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "1.5rem",
+          }}
+        >
+          <span style={{ fontSize: "0.85rem", opacity: 0.75 }}>
+            Showing page {meta.current_page} of {Math.ceil(meta.total / meta.per_page)} (
+            {meta.total} total events)
+          </span>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn outline"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              previous
+            </button>
+            <button
+              type="button"
+              className="btn outline"
+              disabled={page >= Math.ceil(meta.total / meta.per_page) || loading}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {inspectingLog && (
+        <div className="modal-backdrop" onClick={() => setInspectingLog(null)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: "650px", width: "90%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "1rem",
+              }}
+            >
+              <div>
+                <span className="eyebrow">audit record.</span>
+                <h2>Event inspection</h2>
+              </div>
+              <button
+                type="button"
+                className="btn outline"
+                onClick={() => setInspectingLog(null)}
+              >
+                <X size={15} />
+              </button>
+            </header>
+
+            <div
+              style={{
+                display: "grid",
+                gap: "0.75rem",
+                fontSize: "0.88rem",
+                marginBottom: "1.2rem",
+              }}
+            >
+              <div>
+                <small
+                  style={{
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    opacity: 0.7,
+                  }}
+                >
+                  Action
+                </small>
+                <div>
+                  <strong>{inspectingLog.action}</strong>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <small
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      opacity: 0.7,
+                    }}
+                  >
+                    Actor
+                  </small>
+                  <div>
+                    {inspectingLog.actor?.name ?? "System"} (
+                    {inspectingLog.actor?.email ?? "system"})
+                  </div>
+                </div>
+                <div>
+                  <small
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      opacity: 0.7,
+                    }}
+                  >
+                    Recorded At
+                  </small>
+                  <div>{formatDateTime(inspectingLog.created_at)}</div>
+                </div>
+              </div>
+              {inspectingLog.subject_type && (
+                <div>
+                  <small
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      opacity: 0.7,
+                    }}
+                  >
+                    Subject
+                  </small>
+                  <div>
+                    <code>{inspectingLog.subject_type}</code> · ID:{" "}
+                    <code>{inspectingLog.subject_id}</code>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gap: "0.4rem" }}>
+              <small
+                style={{
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  opacity: 0.7,
+                }}
+              >
+                Metadata Payload
+              </small>
+              <pre
+                style={{
+                  background: "#1e1e1e",
+                  color: "#d4d4d4",
+                  padding: "1rem",
+                  borderRadius: "6px",
+                  fontSize: "0.8rem",
+                  overflowX: "auto",
+                  maxHeight: "260px",
+                }}
+              >
+                {JSON.stringify(inspectingLog.metadata, null, 2)}
+              </pre>
+            </div>
           </div>
         </div>
       )}

@@ -61,6 +61,9 @@ const Participants = lazy(() =>
 const AdminSettings = lazy(() =>
   import("../pages/Admin").then((m) => ({ default: m.AdminSettings })),
 );
+const AdminAuditLogs = lazy(() =>
+  import("../pages/Admin").then((m) => ({ default: m.AdminAuditLogs })),
+);
 
 function RoleShell({ requiredRole }: { requiredRole: "participant" | "publisher" | "admin" }) {
   const { role, authChecked, isAdmin, isPublisher, hasPermission } = useApp();
@@ -134,6 +137,7 @@ export const router = createBrowserRouter([
       { path: "/admin/voting", Component: VotingManagement },
       { path: "/admin/results", Component: Results },
       { path: "/admin/participants", Component: Participants },
+      { path: "/admin/audit-logs", Component: AdminAuditLogs },
       { path: "/admin/settings", Component: AdminSettings },
     ],
   },

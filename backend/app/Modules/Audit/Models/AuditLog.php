@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Modules\Audit\Models;
 
+use App\Modules\Identity\Models\User;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 final class AuditLog extends Model
 {
@@ -29,5 +31,13 @@ final class AuditLog extends Model
             'metadata' => 'array',
             'created_at' => 'datetime',
         ];
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function actor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'actor_id');
     }
 }
