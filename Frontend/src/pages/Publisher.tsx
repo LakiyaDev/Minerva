@@ -1,5 +1,30 @@
 import { useCallback, useEffect, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
-import { ArrowUpRight, Check, Download, Edit3, Eye, Paperclip, Plus, Search, Send, Trash2, Upload, X } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  ArrowUpRight,
+  BarChart3,
+  Check,
+  Download,
+  Edit3,
+  Eye,
+  MessageSquare,
+  Paperclip,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+  TrendingUp,
+  Upload,
+  Vote,
+  X,
+} from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { articleStatusLabels, type Article, type ArticleStatus } from "../data";
 import {
@@ -11,6 +36,10 @@ import {
   type ArticleAttachmentDto,
   type ArticleStatusHistoryDto,
 } from "../services/articleService";
+import {
+  getPublisherArticleAnalytics,
+  type ArticleAnalyticsDto,
+} from "../services/analyticsService";
 import { ApiError, ApiUnavailableError } from "../services/apiClient";
 import { useApp, type EditorialResult } from "../store";
 
@@ -36,6 +65,10 @@ export function PublisherDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [analyticsTargetId, setAnalyticsTargetId] = useState<string | null>(null);
+  const [analyticsData, setAnalyticsData] = useState<ArticleAnalyticsDto | null>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const location = useLocation();
 
   useEffect(() => {
@@ -45,6 +78,21 @@ export function PublisherDashboard() {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  const openAnalytics = async (articleId: string) => {
+    setAnalyticsTargetId(articleId);
+    setAnalyticsData(null);
+    setAnalyticsError(null);
+    setLoadingAnalytics(true);
+    try {
+      const data = await getPublisherArticleAnalytics(articleId);
+      setAnalyticsData(data);
+    } catch (err) {
+      setAnalyticsError(err instanceof Error ? err.message : "Unable to load analytics.");
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -244,12 +292,111 @@ export function PublisherDashboard() {
                       <Eye />
                     </Link>
                   )}
+                  <button
+                    type="button"
+                    title="Article analytics"
+                    aria-label="Article analytics"
+                    onClick={() => void openAnalytics(a.id)}
+                  >
+                    <BarChart3 />
+                  </button>
                 </div>
               </div>
             );
           })
         )}
       </div>
+
+      {analyticsTargetId && (
+        <div className="modal-backdrop">
+          <div className="confirm-modal" style={{ maxWidth: "680px", width: "95%" }}>
+            <button
+              className="modal-close"
+              onClick={() => {
+                setAnalyticsTargetId(null);
+                setAnalyticsData(null);
+              }}
+            >
+              <X />
+            </button>
+            <span className="eyebrow">performance & engagement.</span>
+            <h3>Article analytics</h3>
+
+            {loadingAnalytics && <p className="empty-state-copy">Computing metrics…</p>}
+
+            {analyticsError && (
+              <div className="error-banner" role="alert">
+                <span>{analyticsError}</span>
+              </div>
+            )}
+
+            {analyticsData && (
+              <div style={{ display: "grid", gap: "1.25rem", marginTop: "1rem" }}>
+                <div>
+                  <h4 style={{ margin: "0 0 0.25rem 0", fontSize: "1.1rem" }}>
+                    {analyticsData.article.title}
+                  </h4>
+                  <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    <span className={`status ${analyticsData.article.status}`}>
+                      {analyticsData.article.status_label}
+                    </span>
+                    {analyticsData.article.category && (
+                      <small className="field-hint">
+                        {analyticsData.article.category.name}
+                      </small>
+                    )}
+                  </div>
+                </div>
+
+                <div className="stats-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))" }}>
+                  <div className="stat-card">
+                    <strong>{analyticsData.engagement.total_votes}</strong>
+                    <span>total votes</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>
+                      {analyticsData.engagement.rank ? `#${analyticsData.engagement.rank}` : "—"}
+                    </strong>
+                    <span>competition rank</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>{analyticsData.engagement.total_comments}</strong>
+                    <span>total comments</span>
+                  </div>
+                  <div className="stat-card">
+                    <strong>{analyticsData.benchmarks.category_average_votes}</strong>
+                    <span>category avg votes</span>
+                  </div>
+                </div>
+
+                {analyticsData.daily_votes.length > 0 && (
+                  <div style={{ border: "1px solid rgba(128,128,128,0.2)", borderRadius: "8px", padding: "1rem" }}>
+                    <span className="eyebrow" style={{ display: "block", marginBottom: "0.5rem" }}>
+                      vote velocity (last 14 days)
+                    </span>
+                    <div style={{ width: "100%", height: 160 }}>
+                      <ResponsiveContainer>
+                        <AreaChart data={analyticsData.daily_votes}>
+                          <XAxis dataKey="label" stroke="#888" fontSize={11} tickLine={false} />
+                          <YAxis stroke="#888" fontSize={11} tickLine={false} allowDecimals={false} />
+                          <Tooltip />
+                          <Area
+                            type="monotone"
+                            dataKey="votes"
+                            stroke="#C9A227"
+                            fill="rgba(201, 162, 39, 0.2)"
+                            strokeWidth={2}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

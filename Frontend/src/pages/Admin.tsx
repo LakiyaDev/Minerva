@@ -50,6 +50,10 @@ import {
   type CommentDto,
   type CommentStatus,
 } from "../services/commentService";
+import {
+  getAdminAnalytics,
+  type AdminAnalyticsDto,
+} from "../services/analyticsService";
 
 function toDateTimeLocal(iso?: string): string {
   if (!iso) return "";
@@ -74,6 +78,7 @@ function formatDateTime(iso: string): string {
 export function AdminOverview() {
   const { articles, votingStatus } = useApp();
   const [statistics, setStatistics] = useState<VotingStatisticsDto | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalyticsDto | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -84,36 +89,78 @@ export function AdminOverview() {
       .catch(() => {
         // Keep fallback summary cards if API is unreachable or unauthorized.
       });
+
+    getAdminAnalytics(controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setAnalytics(data);
+      })
+      .catch(() => {
+        // Keep fallback if analytics API is unavailable.
+      });
+
     return () => controller.abort();
   }, []);
 
   const published = articles.filter((a) => a.status === "published");
-  const votes = statistics?.total_votes ?? articles.reduce((s, a) => s + a.votes, 0);
-  const chart = statistics
-    ? statistics.top_articles.slice(0, 6).map((a) => ({
-        name: a.title.slice(0, 16) + (a.title.length > 16 ? "…" : ""),
-        votes: a.vote_count,
-      }))
-    : [...published]
-        .sort((a, b) => b.votes - a.votes)
-        .slice(0, 6)
-        .map((a) => ({ name: a.title.slice(0, 16) + "…", votes: a.votes }));
+  const votes =
+    analytics?.voting.total_votes ??
+    statistics?.total_votes ??
+    articles.reduce((s, a) => s + a.votes, 0);
 
-  const windowIsOpen = statistics?.active_period?.is_open ?? votingStatus?.is_open ?? false;
+  const chart = analytics?.top_performing_articles?.length
+    ? analytics.top_performing_articles.slice(0, 6).map((a) => ({
+        name: a.title.slice(0, 16) + (a.title.length > 16 ? "…" : ""),
+        votes: a.votes_count,
+      }))
+    : statistics
+      ? statistics.top_articles.slice(0, 6).map((a) => ({
+          name: a.title.slice(0, 16) + (a.title.length > 16 ? "…" : ""),
+          votes: a.vote_count,
+        }))
+      : [...published]
+          .sort((a, b) => b.votes - a.votes)
+          .slice(0, 6)
+          .map((a) => ({ name: a.title.slice(0, 16) + "…", votes: a.votes }));
+
+  const windowIsOpen =
+    analytics?.voting.active_period?.is_active ??
+    statistics?.active_period?.is_open ??
+    votingStatus?.is_open ??
+    false;
+
+  const trendData = analytics?.voting.daily_trend?.length
+    ? analytics.voting.daily_trend.map((point) => ({
+        day: point.label,
+        votes: point.votes,
+      }))
+    : (statistics?.daily_activity ?? activity);
+
   const stats: Array<[LucideIcon, string | number, string, string]> = [
-    [UsersRound, statistics?.unique_voters ?? 0, "unique voters", "Registered ballots"],
+    [
+      UsersRound,
+      analytics?.voting.unique_voters ?? statistics?.unique_voters ?? 0,
+      "unique voters",
+      "Registered ballots",
+    ],
     [
       FileText,
-      statistics?.published_articles_count ?? published.length,
+      analytics?.articles_summary.by_status.published ??
+        statistics?.published_articles_count ??
+        published.length,
       "published articles",
-      "Competition entries",
+      analytics?.articles_summary.total
+        ? `${analytics.articles_summary.total} total in repository`
+        : "Competition entries",
     ],
     [Vote, votes.toLocaleString(), "total votes", "Final recorded votes"],
     [
       ToggleLeft,
       windowIsOpen ? "Open" : "Closed",
       "ballot window",
-      statistics?.active_period?.name ?? votingStatus?.period?.name ?? "No active period",
+      analytics?.voting.active_period?.name ??
+        statistics?.active_period?.name ??
+        votingStatus?.period?.name ??
+        "No active period",
     ],
   ];
   return (
@@ -137,6 +184,92 @@ export function AdminOverview() {
           </div>
         ))}
       </div>
+
+      {analytics && (
+        <div
+          className="admin-analytics-summary"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: "1rem",
+            marginBottom: "1.5rem",
+            padding: "1rem 1.25rem",
+            background: "#faf8f5",
+            border: "1px solid #e4dcc9",
+            borderRadius: "6px",
+          }}
+        >
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Pending Review
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.articles_summary.by_status.pending_review ?? 0}
+            </strong>
+          </div>
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Drafts / In Progress
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.articles_summary.by_status.draft ?? 0}
+            </strong>
+          </div>
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Community Comments
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.community.total_comments}
+            </strong>
+          </div>
+          <div>
+            <span
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "#6b705c",
+                display: "block",
+                marginBottom: "0.25rem",
+              }}
+            >
+              Moderation Rate
+            </span>
+            <strong style={{ fontSize: "1.25rem", color: "#2e2a21" }}>
+              {analytics.community.moderation_rate_percent}%
+            </strong>
+          </div>
+        </div>
+      )}
+
       <div className="charts-grid">
         <section>
           <header>
@@ -145,11 +278,11 @@ export function AdminOverview() {
               <h2>Votes over time</h2>
             </div>
             <select>
-              <option>Last 6 weeks</option>
+              <option>Last 14 days</option>
             </select>
           </header>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={statistics?.daily_activity ?? activity}>
+            <AreaChart data={trendData}>
               <defs>
                 <linearGradient id="bronze" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#8A6D3B" stopOpacity=".35" />
@@ -916,21 +1049,28 @@ export function VotingManagement() {
 export function Results() {
   const { articles } = useApp();
   const [statistics, setStatistics] = useState<VotingStatisticsDto | null>(null);
+  const [analytics, setAnalytics] = useState<AdminAnalyticsDto | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
 
     const loadStats = () => {
-      getAdminVotingStatistics(controller.signal)
-        .then((data) => {
-          if (!controller.signal.aborted) {
-            setStatistics(data);
-            setError(null);
-          }
-        })
-        .catch((err) => {
-          if (controller.signal.aborted) return;
+      Promise.allSettled([
+        getAdminVotingStatistics(controller.signal),
+        getAdminAnalytics(controller.signal),
+      ]).then(([votingRes, analyticsRes]) => {
+        if (controller.signal.aborted) return;
+        if (votingRes.status === "fulfilled") {
+          setStatistics(votingRes.value);
+          setError(null);
+        }
+        if (analyticsRes.status === "fulfilled") {
+          setAnalytics(analyticsRes.value);
+          setError(null);
+        }
+        if (votingRes.status === "rejected" && analyticsRes.status === "rejected") {
+          const err = votingRes.reason;
           setError(
             err instanceof ApiUnavailableError
               ? "The MINERVA API is unreachable."
@@ -938,7 +1078,8 @@ export function Results() {
                 ? err.message
                 : "Unable to load voting statistics.",
           );
-        });
+        }
+      });
     };
 
     loadStats();
@@ -954,26 +1095,49 @@ export function Results() {
     .filter((a) => a.status === "published")
     .sort((a, b) => b.votes - a.votes);
 
-  const rows = statistics
-    ? statistics.top_articles.map((entry) => ({
-        id: entry.article_id,
+  const rows = analytics?.top_performing_articles?.length
+    ? analytics.top_performing_articles.map((entry) => ({
+        id: entry.id,
         title: entry.title,
         category: entry.category?.name ?? "Uncategorized",
-        votes: entry.vote_count,
+        votes: entry.votes_count,
       }))
-    : fallbackSorted.map((a) => ({
-        id: a.id,
-        title: a.title,
-        category: a.category,
-        votes: a.votes,
-      }));
+    : statistics
+      ? statistics.top_articles.map((entry) => ({
+          id: entry.article_id,
+          title: entry.title,
+          category: entry.category?.name ?? "Uncategorized",
+          votes: entry.vote_count,
+        }))
+      : fallbackSorted.map((a) => ({
+          id: a.id,
+          title: a.title,
+          category: a.category,
+          votes: a.votes,
+        }));
 
-  const total = statistics?.total_votes ?? rows.reduce((s, a) => s + a.votes, 0);
-  const uniqueVoters = statistics?.unique_voters ?? 0;
-  const publishedCount = statistics?.published_articles_count ?? fallbackSorted.length;
-  const pie = (statistics?.by_category ?? [])
-    .filter((item) => item.votes > 0)
-    .map((item) => ({ name: item.name, value: item.votes }));
+  const total =
+    analytics?.voting.total_votes ??
+    statistics?.total_votes ??
+    rows.reduce((s, a) => s + a.votes, 0);
+
+  const uniqueVoters =
+    analytics?.voting.unique_voters ??
+    statistics?.unique_voters ??
+    0;
+
+  const publishedCount =
+    analytics?.articles_summary.by_status.published ??
+    statistics?.published_articles_count ??
+    fallbackSorted.length;
+
+  const pie = analytics?.categories?.length
+    ? analytics.categories
+        .filter((item) => item.votes_count > 0)
+        .map((item) => ({ name: item.name, value: item.votes_count }))
+    : (statistics?.by_category ?? [])
+        .filter((item) => item.votes > 0)
+        .map((item) => ({ name: item.name, value: item.votes }));
   const pieColors = ["#8A6D3B", "#2E2A21", "#C9A227", "#6B705C", "#A58A5B"];
 
   return (
