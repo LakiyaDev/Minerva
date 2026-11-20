@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Shared\Http\Middleware;
 
 use Closure;
-use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 

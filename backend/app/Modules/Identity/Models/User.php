@@ -11,7 +11,6 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -19,7 +18,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, HasRolesAndPermissions, HasUlids, Notifiable, SoftDeletes;
+    use HasApiTokens, HasFactory, HasRolesAndPermissions, HasUlids, Notifiable;
 
     protected $fillable = [
         'name',
@@ -73,9 +72,12 @@ class User extends Authenticatable
         return $this->hasMany(UserPermission::class);
     }
 
+    /**
+     * Accounts are never hard-deleted; deactivation flips `is_active`.
+     */
     public function isActive(): bool
     {
-        return $this->is_active && ! $this->trashed();
+        return $this->is_active;
     }
 
     public function isStaff(): bool

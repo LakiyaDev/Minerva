@@ -14,12 +14,12 @@ return new class extends Migration
             $table->ulid('id')->primary();
             $table->foreignUlid('article_id')->constrained('articles')->cascadeOnDelete();
             // Storage metadata only: never store public URLs or secrets.
-            $table->string('storage_disk', 64);
+            $table->string('storage_disk', 32)->default('s3');
             $table->string('storage_key', 512);
             $table->string('original_name', 255);
-            $table->string('mime_type', 128);
+            $table->string('mime_type', 127);
             $table->unsignedBigInteger('size_bytes');
-            $table->string('kind', 64)->default('document');
+            $table->string('kind', 20)->default('document');
             $table->timestamps();
 
             $table->index(['article_id', 'kind'], 'article_attachments_article_kind_index');

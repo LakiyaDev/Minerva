@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -36,11 +35,13 @@ return new class extends Migration
         });
 
         Schema::create('permission_role', function (Blueprint $table): void {
-            $table->foreignUlid('permission_id')->constrained('permissions')->cascadeOnDelete();
             $table->foreignUlid('role_id')->constrained('roles')->cascadeOnDelete();
+            $table->foreignUlid('permission_id')->constrained('permissions')->cascadeOnDelete();
             $table->timestamps();
 
-            $table->primary(['permission_id', 'role_id']);
+            $table->primary(['role_id', 'permission_id']);
+            // Reverse lookup: which roles hold a permission.
+            $table->index('permission_id');
         });
 
         Schema::create('user_permissions', function (Blueprint $table): void {
@@ -65,23 +66,18 @@ return new class extends Migration
             $table->timestamp('revoked_at')->nullable();
             $table->timestamps();
 
-            $table->index(['user_id', 'revoked_at']);
+            // Schema v1.1 §4.1.8: at most one row per user, active or revoked.
+            // This is the MySQL-compatible substitute for a partial unique
+            // index — re-granting after revocation updates the same row, and
+            // the grant/revoke history lives in `audit_logs`.
+            //
+            // A partial index (`WHERE revoked_at IS NULL`), a functional index
+            // and a generated-column unique index are all unavailable in at
+            // least one target engine: MariaDB has no functional indexes, and
+            // it refuses generated columns over columns used by an
+            // ON DELETE CASCADE foreign key (`user_id` here).
+            $table->unique('user_id', 'publisher_permissions_user_unique');
         });
-
-        // At most one *active* grant per user. MySQL cannot express a partial
-        // unique index directly, so a functional index maps active rows to the
-        // user id and inactive rows to NULL (NULLs are not unique-collisions).
-        //
-        // A stored generated column cannot be used here: InnoDB refuses to add
-        // one to a table that carries foreign keys alongside a composite index
-        // on the referenced columns (MySQL error 1215). The functional index
-        // enforces the same constraint without a materialized column.
-        if (DB::connection()->getDriverName() === 'mysql') {
-            DB::statement(
-                'CREATE UNIQUE INDEX publisher_permissions_one_active_per_user '
-                .'ON publisher_permissions ((IF(revoked_at IS NULL, user_id, NULL)))'
-            );
-        }
     }
 
     public function down(): void

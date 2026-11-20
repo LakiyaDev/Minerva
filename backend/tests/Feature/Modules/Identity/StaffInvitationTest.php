@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Modules\Identity\Exceptions\IdentityException;
+use App\Modules\Identity\Models\StaffInvitation;
 use App\Modules\Identity\Models\User;
 use App\Modules\Identity\Notifications\StaffInvitationNotification;
 use App\Modules\Identity\Services\StaffInvitationService;
@@ -72,7 +74,7 @@ it('rejects an expired invitation', function (): void {
 
     $token = 'known-token';
 
-    $invitation = App\Modules\Identity\Models\StaffInvitation::query()->create([
+    $invitation = StaffInvitation::query()->create([
         'email' => 'late@example.com',
         'role' => 'publisher',
         'invited_by' => $admin->getKey(),
@@ -80,7 +82,7 @@ it('rejects an expired invitation', function (): void {
         'expires_at' => now()->subMinute(),
     ]);
 
-    $this->expectException(App\Modules\Identity\Exceptions\IdentityException::class);
+    $this->expectException(IdentityException::class);
 
     app(StaffInvitationService::class)->accept(
         $token,
@@ -134,10 +136,10 @@ it('does not invite an existing staff account or an assignable non-staff role', 
     $request = Request::create('/');
 
     expect(fn () => $service->invite($admin, $existingStaff->email, 'publisher', $request))
-        ->toThrow(App\Modules\Identity\Exceptions\IdentityException::class);
+        ->toThrow(IdentityException::class);
 
     expect(fn () => $service->invite($admin, 'fresh@example.com', 'participant', $request))
-        ->toThrow(App\Modules\Identity\Exceptions\IdentityException::class);
+        ->toThrow(IdentityException::class);
 
     expect(User::query()->where('email', 'fresh@example.com')->exists())->toBeFalse();
 });

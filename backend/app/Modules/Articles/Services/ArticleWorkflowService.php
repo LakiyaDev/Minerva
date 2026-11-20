@@ -215,9 +215,9 @@ final class ArticleWorkflowService
         $slug = $base;
         $suffix = 2;
 
-        // withTrashed keeps slugs unique against soft-deleted rows too, since
-        // the database unique index covers them.
-        while (Article::withTrashed()->where('slug', $slug)->exists()) {
+        // Articles are never hard-deleted, so the slug is unique for the whole
+        // lifetime of the table and the plain lookup is enough.
+        while (Article::query()->where('slug', $slug)->exists()) {
             $slug = $base.'-'.$suffix++;
         }
 

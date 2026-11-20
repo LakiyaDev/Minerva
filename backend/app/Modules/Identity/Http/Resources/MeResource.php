@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace App\Modules\Identity\Http\Resources;
 
 use App\Modules\Identity\Contracts\IdentityAccess;
+use App\Modules\Identity\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \App\Modules\Identity\Models\User */
+/** @mixin User */
 class MeResource extends JsonResource
 {
     public function toArray(Request $request): array

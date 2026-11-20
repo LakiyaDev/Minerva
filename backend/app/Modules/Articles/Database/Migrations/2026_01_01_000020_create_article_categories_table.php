@@ -12,11 +12,11 @@ return new class extends Migration
     {
         Schema::create('article_categories', function (Blueprint $table): void {
             $table->ulid('id')->primary();
-            $table->string('name', 128);
+            $table->string('name', 120);
             // Unique slug doubles as the only index this table needs for
             // public catalogue filtering.
-            $table->string('slug', 128)->unique();
-            $table->text('description')->nullable();
+            $table->string('slug', 140)->unique();
+            $table->string('description', 500)->nullable();
             $table->timestamps();
         });
     }

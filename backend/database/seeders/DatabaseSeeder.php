@@ -13,8 +13,11 @@ final class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call([
+            // Reference data every environment needs, in dependency order.
             RolePermissionSeeder::class,
+            UniversitySeeder::class,
             ArticleCategorySeeder::class,
+            PlatformSettingSeeder::class,
         ]);
     }
 }

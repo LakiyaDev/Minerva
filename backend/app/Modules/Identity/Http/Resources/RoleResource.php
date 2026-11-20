@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Modules\Identity\Http\Resources;
 
+use App\Modules\Identity\Models\Role;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \App\Modules\Identity\Models\Role */
+/** @mixin Role */
 class RoleResource extends JsonResource
 {
     public function toArray(Request $request): array

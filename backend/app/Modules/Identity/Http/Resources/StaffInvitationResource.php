@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Modules\Identity\Http\Resources;
 
+use App\Modules\Identity\Models\StaffInvitation;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \App\Modules\Identity\Models\StaffInvitation */
+/** @mixin StaffInvitation */
 class StaffInvitationResource extends JsonResource
 {
     public function toArray(Request $request): array
